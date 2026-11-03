@@ -26,6 +26,8 @@ export const ROUTES = {
   SETTINGS: '/settings',
   INTEGRATIONS: '/integrations',
   TUTORIAL: '/tutorial',
+  PRIVACY_POLICY: '/privacy-policy',
+  TERMS_OF_SERVICE: '/terms-of-service',
 } as const;
 
 export const ROLE_HOME: Record<string, string> = {

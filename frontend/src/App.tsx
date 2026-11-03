@@ -25,6 +25,8 @@ import { SettingsPage } from './pages/settings/SettingsPage';
 import { IntegrationsPage } from './pages/admin/IntegrationsPage';
 import { TutorialPage } from './pages/tutorial/TutorialPage';
 import { PublicFormPage } from './pages/public/PublicFormPage';
+import { PrivacyPolicyPage } from './pages/public/PrivacyPolicyPage';
+import { TermsOfServicePage } from './pages/public/TermsOfServicePage';
 
 const App = () => {
   const { user, token, setUser } = useAppStore();
@@ -51,6 +53,8 @@ const App = () => {
     <BrowserRouter>
       <Routes>
         <Route path="/f/:token" element={<PublicFormPage />} />
+        <Route path={ROUTES.PRIVACY_POLICY} element={<PrivacyPolicyPage />} />
+        <Route path={ROUTES.TERMS_OF_SERVICE} element={<TermsOfServicePage />} />
         <Route
           path="*"
           element={
