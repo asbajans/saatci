@@ -27,6 +27,7 @@ import { TutorialPage } from './pages/tutorial/TutorialPage';
 import { PublicFormPage } from './pages/public/PublicFormPage';
 import { PrivacyPolicyPage } from './pages/public/PrivacyPolicyPage';
 import { TermsOfServicePage } from './pages/public/TermsOfServicePage';
+import { UserDataDeletionPage } from './pages/public/UserDataDeletionPage';
 
 const App = () => {
   const { user, token, setUser } = useAppStore();
@@ -55,6 +56,7 @@ const App = () => {
         <Route path="/f/:token" element={<PublicFormPage />} />
         <Route path={ROUTES.PRIVACY_POLICY} element={<PrivacyPolicyPage />} />
         <Route path={ROUTES.TERMS_OF_SERVICE} element={<TermsOfServicePage />} />
+        <Route path={ROUTES.USER_DATA_DELETION} element={<UserDataDeletionPage />} />
         <Route
           path="*"
           element={
