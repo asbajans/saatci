@@ -115,6 +115,8 @@ async function sendToIntegration(
       name: string;
       phone: string;
       email: string | null;
+      externalId?: string | null;
+      source?: string | null;
       fbclid: string | null;
       gclid: string | null;
       ttclid: string | null;
@@ -142,14 +144,17 @@ async function sendToIntegration(
       const userData: Record<string, string> = {};
       if (lead?.email) userData.em = sha256(normalizeEmail(lead.email));
       if (lead?.phone) userData.ph = sha256(normalizePhone(lead.phone));
-      if (lead?.id) userData.external_id = sha256(lead.id);
+      if (lead?.externalId && lead.source === 'Meta Lead Ads') {
+        userData.lead_id = String(lead.externalId);
+      }
       if (lead?.fbclid) userData.fbc = `fb.1.${Date.now()}.${lead.fbclid}`;
       const customData: Record<string, unknown> = {
         currency: event.currency,
         value,
         campaign_id: campaign?.externalId || campaign?.id || event.campaignId,
         campaign_name: campaign?.name,
-        lead_id: lead?.id,
+        lead_event_source: 'Saatçi CRM',
+        event_source: 'crm',
         utm_source: lead?.utmSource,
         utm_medium: lead?.utmMedium,
         utm_campaign: lead?.utmCampaign,
@@ -338,6 +343,8 @@ export async function dispatchDelivery(deliveryId: string) {
               name: true,
               phone: true,
               email: true,
+              externalId: true,
+              source: true,
               fbclid: true,
               gclid: true,
               ttclid: true,
