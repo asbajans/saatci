@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 230 60" width="230" height="60" role="img" aria-label="Saatçi Diş Kliniği">
+  <defs>
+    <linearGradient id="saatciMark" x1="4" y1="4" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1d4ed8"/>
+      <stop offset="1" stop-color="#0e7490"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="52" height="52" rx="15" fill="url(#saatciMark)"/>
+  <path d="M30 15c-4.2-3-10.5-2.8-14.2.9-3.4 3.4-3.1 8.6-1.2 13.7 1.2 3.2 2.1 7.6 3.7 10.4 1.1 2 3.1 1.8 3.7-.6.6-2.5 1.9-5.4 4.5-5.4s3.9 2.9 4.5 5.4c.6 2.4 2.6 2.6 3.7.6 1.6-2.8 2.5-7.2 3.7-10.4 1.9-5.1 2.2-10.3-1.2-13.7C40.5 12.2 34.2 12 30 15z" fill="#fff"/>
+  <path d="M18 22.5c2.6-2.2 6.3-2.4 9-1.2" fill="none" stroke="#bfdbfe" stroke-width="2" stroke-linecap="round"/>
+  <text x="68" y="36" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" fill="#0f172a">Saatçi</text>
+  <text x="69" y="51" font-family="Arial, Helvetica, sans-serif" font-size="9" font-weight="700" letter-spacing="2.4" fill="#64748b">DİŞ KLİNİĞİ</text>
+</svg>

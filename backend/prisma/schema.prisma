@@ -1,0 +1,674 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  DENTIST
+  CALL_CENTER
+  SALES
+  BANKO
+}
+
+enum AppointmentType {
+  MEETING
+  EXAMINATION
+  TREATMENT
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  CLINIC_VISIT
+  TREATMENT_APPROVED
+  APPOINTMENT_BOOKED
+  SOLD
+}
+
+enum TreatmentPlanStatus {
+  DRAFT
+  APPROVED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  OVERDUE
+}
+
+enum VisitStatus {
+  WAITING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum IntegrationType {
+  META_PIXEL
+  META_CAPI
+  META_LEAD_ADS
+  META_MESSENGER
+  INSTAGRAM_DM
+  WHATSAPP
+  GOOGLE_ADS
+  GA4
+  TIKTOK_PIXEL
+  CUSTOM_WEBHOOK
+}
+
+enum ConversionEventType {
+  LEAD_CREATED
+  LEAD_CONTACTED
+  APPOINTMENT_BOOKED
+  CLINIC_VISIT
+  TREATMENT_APPROVED
+  SALE
+  PAYMENT_RECEIVED
+}
+
+enum TrackingStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+model User {
+    id        String    @id @default(uuid())
+    name      String
+    email     String    @unique
+    password  String
+    role      UserRole
+    createdAt DateTime  @default(now())
+    updatedAt DateTime  @updatedAt
+
+    appointments        Appointment[]   @relation("AppointmentStaff")
+    createdAppointments Appointment[]   @relation("AppointmentCreator")
+    workingHours        WorkingHours[]
+    scheduleBlocks      ScheduleBlock[]
+    weeklySchedules     WeeklySchedule[]
+    createdPlans        TreatmentPlan[] @relation("PlanCreator")
+    doctorPlans         TreatmentPlan[] @relation("PlanDoctor")
+    commissions         Commission[]    @relation("UserCommission")
+    collections         Collection[]    @relation("CollectionCollector")
+    cashRegister        CashRegister?   @relation("CashRegisterUser")
+    handoversFrom       CashHandover[]  @relation("CashHandoverFrom")
+    handoversTo         CashHandover[]  @relation("CashHandoverTo")
+    approvedHandovers   CashHandover[]  @relation("CashHandoverApprover")
+    leadStatusChanges   LeadStatusHistory[] @relation("LeadStatusChanger")
+}
+
+model Patient {
+  id            String      @id @default(uuid())
+  hastaNo       String      @unique
+  name          String
+  surname       String
+  tc            String      @unique
+  phone         String
+  email         String?
+  birthDate     DateTime?
+  gender        String?
+  address       String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  appointments   Appointment[]
+  medicalRecord  MedicalRecord?
+  treatmentPlans TreatmentPlan[]
+  leads          Lead[]
+  visits         PatientVisit[]
+  doctorCommissions Commission[] @relation("DoctorCommissionPatient")
+  salesCommissions  Commission[] @relation("SalesCommissionPatient")
+  collections    Collection[]
+}
+
+model MedicalRecord {
+  id           String   @id @default(uuid())
+  patientId    String   @unique
+  patient      Patient  @relation(fields: [patientId], references: [id])
+  allergies    String?
+  chronicDiseases String?
+  medications  String?
+  dentalChart  Json?
+  notes        String?
+  updatedAt    DateTime @updatedAt
+}
+
+model Appointment {
+  id             String            @id @default(uuid())
+  randevuNo      String            @unique
+  patientId      String?
+  patient        Patient?          @relation(fields: [patientId], references: [id])
+  leadId         String?
+  lead           Lead?             @relation(fields: [leadId], references: [id])
+  userId         String?
+  user           User?             @relation("AppointmentStaff", fields: [userId], references: [id])
+  createdById    String?
+  createdBy      User?             @relation("AppointmentCreator", fields: [createdById], references: [id])
+  type           AppointmentType
+  status         AppointmentStatus @default(PENDING)
+  channel        String?
+  campaignId     String?
+  campaign       Campaign?         @relation(fields: [campaignId], references: [id])
+  appointmentDate DateTime
+  endDate        DateTime?
+  createdAt      DateTime          @default(now())
+  notes          String?
+  visit          PatientVisit?
+
+  @@index([patientId])
+  @@index([leadId])
+  @@index([status])
+  @@index([type])
+  @@index([channel])
+  @@index([createdById])
+}
+
+enum SlotStatus {
+  FREE
+  APPOINTMENT
+  LEAVE
+  LUNCH
+  BLOCKED
+}
+
+model WorkingHours {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  date       DateTime
+  start      String   // HH:mm format
+  end        String   // HH:mm format
+  lunchStart String?  // HH:mm format
+  lunchEnd   String?  // HH:mm format
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId, date])
+}
+
+model ScheduleBlock {
+  id        String     @id @default(uuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id])
+  date      DateTime
+  startTime String     // HH:mm format
+  endTime   String     // HH:mm format
+  status    SlotStatus @default(LEAVE)
+  reason    String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([userId, date])
+}
+
+model WeeklySchedule {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  weekday    Int      // 0 = Pazar .. 6 = Cumartesi
+  start      String   // HH:mm
+  end        String   // HH:mm
+  lunchStart String?
+  lunchEnd   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, weekday])
+  @@index([userId])
+}
+
+model Lead {
+  id             String      @id @default(uuid())
+  name           String
+  phone          String
+  email          String?
+  source         String
+  campaignId     String?
+  campaign       Campaign?   @relation(fields: [campaignId], references: [id])
+  status         LeadStatus  @default(NEW)
+  patientId      String?
+  patient        Patient?    @relation(fields: [patientId], references: [id])
+  formId         String?     @db.Uuid
+  form           WebsiteForm? @relation(fields: [formId], references: [id], onDelete: SetNull)
+  externalId     String?
+  utmSource      String?
+  utmMedium      String?
+  utmCampaign    String?
+  utmTerm        String?
+  utmContent     String?
+  fbclid         String?
+  gclid          String?
+  ttclid         String?
+  landingPage    String?
+  referrer       String?
+  rawPayload     Json?
+  lastContactAt  DateTime?
+  createdAt      DateTime    @default(now())
+
+  appointments   Appointment[]
+  visits         PatientVisit[]
+  commissions    Commission[]
+  statusHistory  LeadStatusHistory[]
+  conversionEvents ConversionEvent[]
+
+  @@index([status])
+  @@index([source])
+  @@index([campaignId])
+  @@index([formId])
+  @@index([externalId])
+  @@index([createdAt])
+}
+
+model Campaign {
+  id              String   @id @default(uuid())
+  name            String
+  channel         String
+  platform        String?
+  externalId      String?
+  pixelId         String?
+  utmCampaign     String?
+  notes           String?
+  budget          Decimal?
+  startDate       DateTime?
+  endDate         DateTime?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  leads           Lead[]
+  appointments    Appointment[]
+  visits          PatientVisit[]
+  plans           TreatmentPlan[]
+  websiteForms    WebsiteForm[]
+  statusHistory   LeadStatusHistory[]
+  conversionEvents ConversionEvent[]
+
+  @@index([channel])
+  @@index([platform])
+  @@index([isActive])
+}
+
+model WebsiteForm {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String
+  token          String   @unique
+  source         String   @default("Web")
+  campaignId     String?  @db.Uuid
+  campaign       Campaign? @relation(fields: [campaignId], references: [id])
+  isActive       Boolean  @default(true)
+  successMessage String?  @default("Başvurunuz alındı. En kısa sürede sizi arayacağız.")
+  redirectUrl    String?
+  allowedOrigins String?
+  fields         Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  leads          Lead[]
+
+  @@index([campaignId])
+  @@index([isActive])
+}
+
+model LeadStatusHistory {
+  id          String   @id @default(uuid()) @db.Uuid
+  leadId      String   @db.Uuid
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  campaignId  String?  @db.Uuid
+  campaign    Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  fromStatus  String?
+  toStatus    String
+  note        String?
+  changedById String?  @db.Uuid
+  changedBy   User?    @relation("LeadStatusChanger", fields: [changedById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([leadId])
+  @@index([campaignId])
+  @@index([toStatus])
+  @@index([createdAt])
+}
+
+model ConversionEvent {
+  id            String              @id @default(uuid()) @db.Uuid
+  type          ConversionEventType
+  leadId        String?             @db.Uuid
+  lead          Lead?               @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  campaignId    String?             @db.Uuid
+  campaign      Campaign?           @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  appointmentId String?             @db.Uuid
+  patientId     String?             @db.Uuid
+  planId        String?             @db.Uuid
+  invoiceId     String?             @db.Uuid
+  value         Decimal?
+  currency      String              @default("TRY")
+  payload       Json?
+  createdAt     DateTime            @default(now())
+
+  deliveries    IntegrationDelivery[]
+
+  @@index([type])
+  @@index([leadId])
+  @@index([campaignId])
+  @@index([createdAt])
+}
+
+model Integration {
+  id          String          @id @default(uuid()) @db.Uuid
+  name        String
+  type        IntegrationType
+  isActive    Boolean         @default(true)
+  config      Json?
+  lastEventAt DateTime?
+  lastError   String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  deliveries  IntegrationDelivery[]
+
+  @@unique([type, name])
+  @@index([type])
+  @@index([isActive])
+}
+
+model IntegrationDelivery {
+  id            String          @id @default(uuid()) @db.Uuid
+  eventId       String          @db.Uuid
+  event         ConversionEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  integrationId String          @db.Uuid
+  integration   Integration     @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  status        TrackingStatus  @default(PENDING)
+  response      Json?
+  error         String?
+  sentAt        DateTime?
+  createdAt     DateTime        @default(now())
+
+  @@index([eventId])
+  @@index([integrationId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model InboundEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  type        String
+  externalId  String?
+  payload     Json?
+  status      String   @default("PENDING")
+  error       String?
+  leadId      String?  @db.Uuid
+  processedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ServiceCategory {
+    id          String   @id @default(uuid()) @db.Uuid
+    name        String   @unique
+    description String?
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @updatedAt
+}
+
+model Service {
+    id          String   @id @default(uuid()) @db.Uuid
+    category    String   // implant, treatment, surgery, product, etc.
+    name        String
+    description String?
+    price       Decimal
+    isActive     Boolean  @default(true)
+    createdAt    DateTime @default(now())
+    updatedAt    DateTime @updatedAt
+
+    items        TreatmentItem[]
+
+    @@unique([category, name])
+    @@index([category])
+}
+
+model TreatmentPlan {
+    id            String             @id @default(uuid())
+    patientId     String
+    patient       Patient            @relation(fields: [patientId], references: [id])
+    createdById   String?
+    createdBy     User?              @relation("PlanCreator", fields: [createdById], references: [id])
+    doctorId      String?   @db.Uuid
+    doctor        User?              @relation("PlanDoctor", fields: [doctorId], references: [id])
+    status        TreatmentPlanStatus @default(DRAFT)
+    totalPrice    Decimal
+    discount      Decimal            @default(0)
+    paymentPlan   Json?
+    channel       String?
+    campaignId    String?
+    campaign      Campaign?          @relation(fields: [campaignId], references: [id])
+    items         TreatmentItem[]
+    invoices      Invoice[]
+    approvedAt    DateTime?
+    createdAt     DateTime          @default(now())
+    updatedAt     DateTime          @updatedAt
+
+    @@index([createdById])
+    @@index([doctorId])
+    @@index([channel])
+}
+
+model TreatmentItem {
+    id          String   @id @default(uuid())
+    planId      String
+    plan        TreatmentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+    toothNo     String?
+    serviceId   String?   @db.Uuid
+    service      Service?  @relation(fields: [serviceId], references: [id])
+    treatment   String
+    price       Decimal
+    quantity    Int      @default(1)
+    stepOrder   Int      @default(1)
+}
+
+model Invoice {
+  id          String   @id @default(uuid())
+  planId      String
+  plan        TreatmentPlan @relation(fields: [planId], references: [id])
+  amount      Decimal
+  paidAmount  Decimal  @default(0)
+  status      InvoiceStatus @default(UNPAID)
+  dueDate     DateTime?
+  paidAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  bankoCommissions Commission[]
+  collections      Collection[]
+}
+
+model PaymentMethod {
+  id          String       @id @default(uuid())
+  name        String       @unique
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  collections Collection[]
+}
+
+model Collection {
+  id            String        @id @default(uuid())
+  invoiceId     String?
+  invoice       Invoice?      @relation(fields: [invoiceId], references: [id])
+  patientId     String?
+  patient       Patient?      @relation(fields: [patientId], references: [id])
+  amount        Decimal
+  methodId      String
+  method        PaymentMethod @relation(fields: [methodId], references: [id])
+  collectedById String
+  collectedBy   User          @relation("CollectionCollector", fields: [collectedById], references: [id])
+  notes         String?
+  createdAt     DateTime      @default(now())
+
+  @@index([invoiceId])
+  @@index([patientId])
+  @@index([methodId])
+  @@index([collectedById])
+  @@index([createdAt])
+}
+
+model CashRegister {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation("CashRegisterUser", fields: [userId], references: [id])
+  balance   Decimal  @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum CashHandoverStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model CashHandover {
+  id           String             @id @default(uuid())
+  fromUserId   String
+  fromUser     User               @relation("CashHandoverFrom", fields: [fromUserId], references: [id])
+  toUserId     String
+  toUser       User               @relation("CashHandoverTo", fields: [toUserId], references: [id])
+  amount       Decimal
+  status       CashHandoverStatus @default(PENDING)
+  note         String?
+  approvedById String?
+  approvedBy   User?              @relation("CashHandoverApprover", fields: [approvedById], references: [id])
+  approvedAt   DateTime?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@index([fromUserId])
+  @@index([toUserId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PatientVisit {
+  id            String      @id @default(uuid())
+  protokolNo    String      @unique
+  appointmentId String?     @unique
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id])
+  patientId     String?
+  patient       Patient?    @relation(fields: [patientId], references: [id])
+  leadId        String?
+  lead          Lead?       @relation(fields: [leadId], references: [id])
+  channel       String?
+  campaignId    String?
+  campaign      Campaign?   @relation(fields: [campaignId], references: [id])
+  status        VisitStatus @default(WAITING)
+  visitDate     DateTime    @default(now())
+  notes         String?
+  createdAt     DateTime    @default(now())
+
+  @@index([patientId])
+  @@index([leadId])
+  @@index([channel])
+  @@index([status])
+  @@index([visitDate])
+}
+
+model MessageLog {
+  id          String   @id @default(uuid())
+  patientId   String?
+  channel     String
+  direction   String
+  content     String
+  sentAt      DateTime @default(now())
+
+  @@index([patientId])
+  @@index([channel])
+}
+
+model ExpenseCategory {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  expenses    Expense[]
+}
+
+model Expense {
+  id              String        @id @default(uuid())
+  categoryId      String
+  category        ExpenseCategory @relation(fields: [categoryId], references: [id])
+  name            String
+  amount          Decimal
+  expenseDate     DateTime
+  description     String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([categoryId])
+  @@index([expenseDate])
+}
+
+model CommissionRate {
+    id           String   @id @default(uuid())
+    role         UserRole
+    type         String   // doctor, sales, callcenter, banko
+    serviceCategory String? // implant, treatment, surgery, product, etc.
+    rate         Decimal  // percentage
+    isActive     Boolean  @default(true)
+    createdAt    DateTime @default(now())
+    updatedAt    DateTime @updatedAt
+
+    @@unique([role, type])
+}
+
+model Commission {
+  id                 String   @id @default(uuid())
+  userId             String
+  user               User     @relation("UserCommission", fields: [userId], references: [id])
+  type               String   // doctor, sales, callcenter, banko
+  periodStart        DateTime
+  periodEnd          DateTime
+  totalAmount        Decimal
+  commissionRate     Decimal
+  calculatedAmount   Decimal
+  status             String   // pending, calculated, paid
+  calculatedAt       DateTime?
+  paidAt             DateTime?
+  paymentReference   String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  doctorPatientId    String?
+  doctorPatient      Patient? @relation("DoctorCommissionPatient", fields: [doctorPatientId], references: [id])
+
+  salesPatientId     String?
+  salesPatient       Patient? @relation("SalesCommissionPatient", fields: [salesPatientId], references: [id])
+
+  callcenterLeadId   String?
+  callcenterLead     Lead?    @relation(fields: [callcenterLeadId], references: [id])
+
+  bankoInvoiceId     String?
+  bankoInvoice       Invoice? @relation(fields: [bankoInvoiceId], references: [id])
+
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+  @@index([periodStart, periodEnd])
+}
