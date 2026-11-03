@@ -96,6 +96,7 @@ Yönetici panelinde **Entegrasyon & Kampanya** ekranını açın.
 - Doğrulama anahtarı `META_VERIFY_TOKEN` veya entegrasyon içindeki `verifyToken` ile aynı olmalıdır.
 - Gelen lead `leadgen_id` ile tekrar kontrol edilir; telefon numarası bulunursa lead otomatik oluşturulur.
 - Varsayılan kampanya seçilirse lead o kampanyaya bağlanır. Aksi halde reklam kimliği kampanya `externalId` alanıyla eşleştirilir.
+- **Meta kampanya ve lead senkronizasyonu**: Yönetici panelinde **Entegrasyon & Kampanya > Meta Reklamlar** sekmesinden Meta üzerindeki kampanyaları ve leadleri CRM'ye çekebilirsiniz. Gerekli environment değişkenleri: `META_PAGE_ACCESS_TOKEN` ve `META_AD_ACCOUNT_ID` (veya META_LEAD_ADS entegrasyonunda Sayfa Erişim Tokenı ve Reklam Hesap ID).
 
 ### Messenger, Instagram DM ve WhatsApp
 

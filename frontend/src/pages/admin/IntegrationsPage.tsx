@@ -4,7 +4,13 @@ import { api } from '../../lib/api';
 import { Badge, Button, Card, Empty, Field, Input, LoadingText, Modal, PageHeader, Select, Table } from '../../components/ui';
 import { LEAD_STATUS_LABEL, apiError, dateTime, money } from '../../lib/format';
 
-type Tab = 'overview' | 'integrations' | 'forms' | 'campaigns' | 'events';
+type Tab =
+  | 'overview'
+  | 'integrations'
+  | 'forms'
+  | 'campaigns'
+  | 'events'
+  | 'meta';
 
 type ConfigField = {
   key: string;
@@ -133,6 +139,13 @@ export const IntegrationsPage: React.FC = () => {
   const [integrationModal, setIntegrationModal] = useState<any>({ ...emptyIntegration });
   const [formModal, setFormModal] = useState<any>({ ...emptyForm });
   const [campaignModal, setCampaignModal] = useState<any>({ ...emptyCampaign });
+  const [metaSyncLoading, setMetaSyncLoading] = useState(false);
+  const [metaAdAccountId, setMetaAdAccountId] = useState('');
+
+  const leadsQuery = useQuery({
+    queryKey: ['meta-leads'],
+    queryFn: async () => (await api.get('/leads')).data.data as any[],
+  });
 
   const summaryQuery = useQuery({
     queryKey: ['conversion-summary'],
@@ -165,6 +178,9 @@ export const IntegrationsPage: React.FC = () => {
   });
 
   const campaigns = campaignsQuery.data || [];
+  const leads = leadsQuery.data || [];
+  const metaCampaigns = campaigns.filter((c: any) => c.channel === 'Meta' || c.platform === 'Meta' || !!c.externalId);
+  const metaLeads = leads.filter((l: any) => l.source === 'Meta Lead Ads');
   const summary = summaryQuery.data;
   const integrations = integrationsQuery.data || [];
 
@@ -176,6 +192,7 @@ export const IntegrationsPage: React.FC = () => {
       'campaigns',
       'conversion-events',
       'inbound-events',
+      'meta-leads',
     ]) {
       queryClient.invalidateQueries({ queryKey: [key] });
     }
@@ -187,6 +204,7 @@ export const IntegrationsPage: React.FC = () => {
     { key: 'forms', label: 'Site Formları' },
     { key: 'campaigns', label: 'Kampanyalar' },
     { key: 'events', label: 'Olaylar' },
+    { key: 'meta', label: 'Meta Reklamlar' },
   ];
 
   const openIntegration = (item?: any) => {
@@ -228,6 +246,21 @@ export const IntegrationsPage: React.FC = () => {
       invalidateAll();
     } catch (err) {
       alert(apiError(err));
+    }
+  };
+
+  const syncMeta = async (endpoint: string) => {
+    setMetaSyncLoading(true);
+    try {
+      const body: any = {};
+      if (metaAdAccountId.trim()) body.adAccountId = metaAdAccountId.trim();
+      await api.post(endpoint, body);
+      invalidateAll();
+      alert('Meta senkronizasyonu tamamlandı');
+    } catch (err) {
+      alert(apiError(err));
+    } finally {
+      setMetaSyncLoading(false);
     }
   };
 
@@ -525,6 +558,97 @@ export const IntegrationsPage: React.FC = () => {
               </Card>
             </>
           )}
+        </div>
+      )}
+
+      {activeTab === 'meta' && (
+        <div className="space-y-6">
+          <PageHeader title="Meta Reklamlar & Lead'ler" subtitle="Meta iş ortağı kampanyalarını ve form/Mesaj lead'lerini CRM'ye çekin" />
+          <Card className="p-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h3 className="font-semibold text-slate-900">Meta Senkronizasyonu</h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  META_LEAD_ADS entegrasyonunda Sayfa Erişim Tokenı tanımlı olmalı. Reklam hesabı ID ('act_...') environment değişkende veya aşağıdan girilebilir.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Input
+                  value={metaAdAccountId}
+                  onChange={(e) => setMetaAdAccountId(e.target.value)}
+                  placeholder="act_123456789"
+                />
+                <Button
+                  onClick={() => syncMeta('/integrations/meta/sync-campaigns')}
+                  disabled={metaSyncLoading}
+                >
+                  {metaSyncLoading ? 'Çalışıyor...' : 'Kampanyaları Çek'}
+                </Button>
+                <Button
+                  onClick={() => syncMeta('/integrations/meta/sync-leads')}
+                  disabled={metaSyncLoading}
+                >
+                  {metaSyncLoading ? 'Çalışıyor...' : 'Leadleri Çek'}
+                </Button>
+              </div>
+            </div>
+          </Card>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card>
+              <div className="px-6 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-slate-900">Meta Kampanyaları</h3>
+                  <p className="text-xs text-slate-500 mt-1">CRM'de Meta olarak işaretlenen kampanyalar</p>
+                </div>
+              </div>
+              <div className="overflow-x-auto p-6">
+                <Table head={['Kampanya', 'Durum', 'Lead Sayısı', 'Dış ID']}>
+                  {metaCampaigns.map((c: any) => (
+                    <tr key={c.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3">{c.name}</td>
+                      <td className="px-4 py-3 text-slate-600">{c.isActive ? 'Aktif' : 'Pasif'}</td>
+                      <td className="px-4 py-3 font-semibold">{metaLeads.filter((l: any) => l.campaignId === c.id).length}</td>
+                      <td className="px-4 py-3 text-slate-500 text-sm">{c.externalId || '-'}</td>
+                    </tr>
+                  ))}
+                </Table>
+              </div>
+              {metaCampaigns.length === 0 && (
+                <div className="p-6 text-center text-sm text-slate-500">
+                  Meta kampanya bulunamadı. Önce 'Kampanyaları Çek' düğmesini kullanın.
+                </div>
+              )}
+            </Card>
+
+            <Card>
+              <div className="px-6 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-slate-900">Meta Lead'ler</h3>
+                  <p className="text-xs text-slate-500 mt-1">Reklam/form üzerinden gelen potansiyel müşteriler</p>
+                </div>
+              </div>
+              <div className="overflow-x-auto p-6">
+                <Table head={['Reklam', 'Kampanya', 'Ad Soyad', 'Telefon', 'Durum', 'Oluşturulma']}>
+                  {metaLeads.map((l: any) => (
+                    <tr key={l.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 text-slate-600 text-sm">{l.rawPayload?.ad_name || l.rawPayload?.ad_id || '-'}</td>
+                      <td className="px-4 py-3 text-slate-600 text-sm">{l.campaign?.name || '-'}</td>
+                      <td className="px-4 py-3">{l.name}</td>
+                      <td className="px-4 py-3">{l.phone}</td>
+                      <td className="px-4 py-3"><Badge tone={statusTone(l.status)}>{l.status}</Badge></td>
+                      <td className="px-4 py-3 text-slate-500 text-sm">{dateTime(l.createdAt)}</td>
+                    </tr>
+                  ))}
+                </Table>
+              </div>
+              {metaLeads.length === 0 && (
+                <div className="p-6 text-center text-sm text-slate-500">
+                  Meta lead bulunamadı. 'Leadleri Çek' düğmesini kullanın veya webhook üzerinden gelmesini bekleyin.
+                </div>
+              )}
+            </Card>
+          </div>
         </div>
       )}
 

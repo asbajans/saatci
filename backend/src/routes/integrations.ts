@@ -5,6 +5,7 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import { authMiddleware, roleGuard } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { decryptConfig, encryptConfig, mergeSecrets, redactConfig } from '../lib/secrets';
+import { syncMetaCampaigns, syncMetaLeads } from '../lib/meta';
 
 const router = Router();
 
@@ -184,6 +185,82 @@ router.post(
       });
     }
     return res.json({ success: true, data: { ok: true, message: 'Yapılandırma alanları doğrulandı.' } });
+  })
+);
+
+router.post(
+  '/meta/sync-campaigns',
+  roleGuard('ADMIN'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const data = z
+      .object({
+        accessToken: z.string().optional(),
+        adAccountId: z.string().optional(),
+      })
+      .parse(req.body);
+
+    const leadAds = await prisma.integration.findFirst({
+      where: { type: 'META_LEAD_ADS' as any, isActive: true },
+    });
+
+    const accessToken =
+      data.accessToken ||
+      (leadAds?.config as any)?.pageAccessToken ||
+      process.env.META_PAGE_ACCESS_TOKEN ||
+      process.env.META_ACCESS_TOKEN;
+
+    const adAccountId =
+      data.adAccountId ||
+      (leadAds?.config as any)?.adAccountId ||
+      process.env.META_AD_ACCOUNT_ID;
+
+    if (!accessToken || !adAccountId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Meta sayfa erişim tokenı ve reklam hesabı ID gerekli (META_AD_ACCOUNT_ID)',
+      });
+    }
+
+    const result = await syncMetaCampaigns({ accessToken, adAccountId });
+    res.json({ success: true, data: result });
+  })
+);
+
+router.post(
+  '/meta/sync-leads',
+  roleGuard('ADMIN'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const data = z
+      .object({
+        accessToken: z.string().optional(),
+        adAccountId: z.string().optional(),
+      })
+      .parse(req.body);
+
+    const leadAds = await prisma.integration.findFirst({
+      where: { type: 'META_LEAD_ADS' as any, isActive: true },
+    });
+
+    const accessToken =
+      data.accessToken ||
+      (leadAds?.config as any)?.pageAccessToken ||
+      process.env.META_PAGE_ACCESS_TOKEN ||
+      process.env.META_ACCESS_TOKEN;
+
+    const adAccountId =
+      data.adAccountId ||
+      (leadAds?.config as any)?.adAccountId ||
+      process.env.META_AD_ACCOUNT_ID;
+
+    if (!accessToken || !adAccountId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Meta sayfa erişim tokenı ve reklam hesabı ID gerekli (META_AD_ACCOUNT_ID)',
+      });
+    }
+
+    const result = await syncMetaLeads({ accessToken, adAccountId });
+    res.json({ success: true, data: result });
   })
 );
 
