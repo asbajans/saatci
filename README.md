@@ -178,13 +178,13 @@ Backend konteyneri açılışta `prisma migrate deploy` çalıştırır ve ardı
 1. GitHub deposunu oluşturun ve bu projeyi push edin.
 2. Portainer'da yeni bir stack oluşturun, repository olarak bu depoyu seçin.
 3. Stack ortam değişkenlerini yukarıdaki gibi tanımlayın.
-4. GitHub repository secrets:
-   - `PORTAINER_URL` (örn. `https://cont.asb.web.tr`)
-   - `PORTAINER_API_KEY`
-   - `PORTAINER_STACK_ID`
-   - `PORTAINER_ENDPOINT_ID` (varsayılan `2`)
-5. `main` dalına push edildiğinde CI/CD çalışır ve Portainer stack'ini yeniden dağıtır.
-6. Cloudflare'de `saatci.asb.web.tr` alan adını sunucuya yönlendirin.
+4. Portainer stack ayarlarından **Webhook URL**'ünü kopyalayın.
+5. GitHub repository secrets:
+   - `PORTAINER_WEBHOOK_URL` (Portainer stack webhook URL'si)
+6. `main` dalına push edildiğinde CI/CD çalışır ve Portainer webhook ile stack'i yeniden dağıtır.
+7. Cloudflare'de `saatci.asb.web.tr` alan adını sunucuya yönlendirin.
+
+Webhook secret'i tanımlanmamışsa deploy işi atlanır; bu durumda Portainer'dan manuel yeniden dağıtım yapabilirsiniz.
 
 ## Sağlık kontrolü
 
