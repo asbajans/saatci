@@ -84,7 +84,10 @@ export type LeadStatus =
   | 'CLINIC_VISIT'
   | 'TREATMENT_APPROVED'
   | 'APPOINTMENT_BOOKED'
-  | 'SOLD';
+  | 'SOLD'
+  | 'IRRELEVANT'
+  | 'PRICE_HIGH'
+  | 'CALLBACK';
 
 export type Lead = {
   id: string;
@@ -100,6 +103,8 @@ export type Lead = {
   utmSource?: string | null;
   utmMedium?: string | null;
   utmCampaign?: string | null;
+  callbackAt?: string | null;
+  callbackNote?: string | null;
   createdAt: string;
   appointments?: Appointment[];
   visits?: Visit[];

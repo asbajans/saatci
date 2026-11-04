@@ -7,7 +7,22 @@ import { z } from 'zod';
 
 const router = Router();
 
-const leadStatusEnum = z.enum(['NEW', 'CONTACTED', 'CLINIC_VISIT', 'TREATMENT_APPROVED', 'APPOINTMENT_BOOKED', 'SOLD']);
+const leadStatusEnum = z.enum([
+  'NEW',
+  'CONTACTED',
+  'CLINIC_VISIT',
+  'TREATMENT_APPROVED',
+  'APPOINTMENT_BOOKED',
+  'SOLD',
+  'IRRELEVANT',
+  'PRICE_HIGH',
+  'CALLBACK',
+]);
+
+const callbackFields = {
+  callbackAt: z.string().datetime({ offset: true }).nullable().optional(),
+  callbackNote: z.string().max(1000).nullable().optional(),
+};
 
 const attributionFields = {
   utmSource: z.string().optional(),
@@ -33,6 +48,7 @@ const leadSchema = z.object({
   status: leadStatusEnum.optional(),
   patientId: z.string().uuid().optional().nullable(),
   ...attributionFields,
+  ...callbackFields,
 });
 
 const leadUpdateSchema = z.object({
@@ -44,6 +60,7 @@ const leadUpdateSchema = z.object({
   status: leadStatusEnum.optional(),
   patientId: z.string().uuid().nullable().optional(),
   ...attributionFields,
+  ...callbackFields,
 });
 
 const includeRelations = {
@@ -69,6 +86,41 @@ router.get(
       orderBy: { createdAt: 'desc' },
     });
     res.json({ success: true, data: leads });
+  })
+);
+
+router.get(
+  '/reminders',
+  roleGuard('ADMIN', 'CALL_CENTER', 'SALES'),
+  asyncHandler(async (_req: Request, res: Response) => {
+    const now = new Date();
+    const select = {
+      id: true,
+      name: true,
+      phone: true,
+      source: true,
+      status: true,
+      callbackAt: true,
+      callbackNote: true,
+      campaign: { select: { id: true, name: true } },
+    } as const;
+
+    const [due, upcoming] = await Promise.all([
+      prisma.lead.findMany({
+        where: { status: 'CALLBACK', callbackAt: { lte: now } },
+        select,
+        orderBy: { callbackAt: 'asc' },
+        take: 50,
+      }),
+      prisma.lead.findMany({
+        where: { status: 'CALLBACK', callbackAt: { gt: now } },
+        select,
+        orderBy: { callbackAt: 'asc' },
+        take: 20,
+      }),
+    ]);
+
+    res.json({ success: true, data: { due, upcoming, serverTime: now } });
   })
 );
 
@@ -109,6 +161,9 @@ router.post(
       ? await prisma.campaign.findUnique({ where: { id: campaignId }, select: { channel: true } })
       : null;
     const status = data.status ?? 'NEW';
+    if (status === 'CALLBACK' && !data.callbackAt) {
+      return res.status(400).json({ success: false, message: 'Tekrar arama zamanı seçilmelidir' });
+    }
 
     const lead = await prisma.lead.create({
       data: {
@@ -119,6 +174,8 @@ router.post(
         campaignId: campaignId || null,
         status,
         patientId: data.patientId || null,
+        callbackAt: data.callbackAt ? new Date(data.callbackAt) : null,
+        callbackNote: data.callbackNote || null,
         utmSource: data.utmSource,
         utmMedium: data.utmMedium,
         utmCampaign: data.utmCampaign,
@@ -146,7 +203,11 @@ router.patch(
   roleGuard('ADMIN', 'CALL_CENTER', 'SALES'),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const data = leadUpdateSchema.parse(req.body);
-    const { email, campaignId, patientId, status, ...rest } = data;
+    const { email, campaignId, patientId, status, callbackAt, callbackNote, ...rest } = data;
+
+    if (status === 'CALLBACK' && !callbackAt) {
+      return res.status(400).json({ success: false, message: 'Tekrar arama zamanı seçilmelidir' });
+    }
 
     const campaignIdResolved =
       campaignId === undefined
@@ -162,6 +223,8 @@ router.patch(
         ...(email !== undefined ? { email: email || null } : {}),
         ...(patientId !== undefined ? { patientId } : {}),
         ...(campaignIdResolved !== undefined ? { campaignId: campaignIdResolved } : {}),
+        ...(callbackAt !== undefined ? { callbackAt: callbackAt ? new Date(callbackAt) : null } : {}),
+        ...(callbackNote !== undefined ? { callbackNote: callbackNote || null } : {}),
       },
     });
 
@@ -171,6 +234,8 @@ router.patch(
         status,
         changedById: req.user!.id,
         note: 'Lead güncelleme ekranından değiştirildi',
+        callbackAt: callbackAt !== undefined ? (callbackAt ? new Date(callbackAt) : null) : undefined,
+        callbackNote: callbackNote !== undefined ? callbackNote || null : undefined,
       });
     }
 
@@ -186,14 +251,19 @@ router.patch(
   '/:id/status',
   roleGuard('ADMIN', 'CALL_CENTER', 'SALES'),
   asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { status, note } = z
-      .object({ status: leadStatusEnum, note: z.string().optional() })
+    const { status, note, callbackAt, callbackNote } = z
+      .object({ status: leadStatusEnum, note: z.string().optional(), ...callbackFields })
       .parse(req.body);
+    if (status === 'CALLBACK' && !callbackAt) {
+      return res.status(400).json({ success: false, message: 'Tekrar arama zamanı seçilmelidir' });
+    }
     const lead = await changeLeadStatus({
       leadId: req.params.id,
       status,
       changedById: req.user!.id,
       note,
+      callbackAt: callbackAt ? new Date(callbackAt) : undefined,
+      callbackNote: callbackNote !== undefined ? callbackNote || null : undefined,
     });
     if (!lead) {
       return res.status(404).json({ success: false, message: 'Lead bulunamadı' });

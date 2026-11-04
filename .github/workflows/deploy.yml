@@ -9,6 +9,9 @@ on:
 env:
   NODE_VERSION: '20'
 
+permissions:
+  contents: read
+
 jobs:
   frontend-ci:
     name: Frontend CI
@@ -98,6 +101,9 @@ jobs:
           DATABASE_URL: postgresql://saatci:saatci_test_password@localhost:5432/saatci?schema=public
           JWT_SECRET: test-secret
 
+      - name: Build backend
+        run: npm run build
+
   docker-build:
     name: Docker Build Test
     runs-on: ubuntu-latest
@@ -117,8 +123,8 @@ jobs:
           push: false
           tags: saatci-frontend:test
           load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
 
       - name: Build backend image
         uses: docker/build-push-action@v5
@@ -127,8 +133,8 @@ jobs:
           push: false
           tags: saatci-backend:test
           load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
 
       - name: Test frontend container
         run: |
@@ -185,20 +191,32 @@ jobs:
     name: Deploy via Portainer Webhook
     runs-on: ubuntu-latest
     needs: [frontend-ci, backend-ci, docker-build]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && env.PORTAINER_WEBHOOK_URL != ''
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    timeout-minutes: 20
+    concurrency:
+      group: portainer-deploy-main
+      cancel-in-progress: false
     env:
       PORTAINER_WEBHOOK_URL: ${{ secrets.PORTAINER_WEBHOOK_URL }}
+      HEALTH_URL: https://saatci.asb.web.tr/api/health
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Trigger Portainer webhook redeploy
+      - name: Check webhook configuration
+        id: webhook
         run: |
           if [ -z "$PORTAINER_WEBHOOK_URL" ]; then
-            echo "PORTAINER_WEBHOOK_URL secret is not set; skipping deployment."
-            exit 0
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::PORTAINER_WEBHOOK_URL secret is not set. Deployment skipped."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
-          HTTP_CODE=$(curl -s -w "\n%{http_code}" -X POST "$PORTAINER_WEBHOOK_URL" -o /tmp/portainer-webhook-response.txt)
+
+      - name: Trigger Portainer webhook redeploy
+        if: steps.webhook.outputs.configured == 'true'
+        run: |
+          HTTP_CODE=$(curl -sS --max-time 30 --retry 3 --retry-delay 5 \
+            -o /tmp/portainer-webhook-response.txt \
+            -w "%{http_code}" \
+            -X POST "$PORTAINER_WEBHOOK_URL")
           cat /tmp/portainer-webhook-response.txt
           echo "HTTP Code: $HTTP_CODE"
           if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
@@ -209,10 +227,11 @@ jobs:
           fi
 
       - name: Wait for deployment
+        if: steps.webhook.outputs.configured == 'true'
         run: |
           sleep 60
           for i in {1..10}; do
-            HEALTH=$(curl -s -o /dev/null -w "%{http_code}" https://saatci.asb.web.tr/api/health || echo "000")
+            HEALTH=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$HEALTH_URL" || echo "000")
             if [ "$HEALTH" = "200" ]; then
               echo "Health check passed"
               exit 0
@@ -224,14 +243,14 @@ jobs:
           exit 1
 
       - name: Notify success
-        if: success()
+        if: success() && steps.webhook.outputs.configured == 'true'
         run: |
           echo "Deployment successful"
           echo "Commit: ${{ github.sha }}"
           echo "URL: https://saatci.asb.web.tr"
 
       - name: Notify failure
-        if: failure()
+        if: failure() && steps.webhook.outputs.configured == 'true'
         run: |
           echo "Deployment failed"
           echo "Commit: ${{ github.sha }}"

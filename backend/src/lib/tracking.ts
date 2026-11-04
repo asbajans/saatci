@@ -513,22 +513,38 @@ export async function changeLeadStatus(params: {
   planId?: string | null;
   invoiceId?: string | null;
   payload?: Record<string, unknown>;
+  callbackAt?: Date | null;
+  callbackNote?: string | null;
 }) {
   const lead = await prisma.lead.findUnique({
     where: { id: params.leadId },
     include: { campaign: { select: { id: true, name: true, channel: true } } },
   });
   if (!lead) return null;
-  if (lead.status === params.status) return lead;
 
   const fromStatus = lead.status;
+  const statusChanged = fromStatus !== params.status;
+  const hasCallbackUpdate = params.callbackAt !== undefined || params.callbackNote !== undefined;
+  if (!statusChanged && !hasCallbackUpdate) return lead;
+
+  const callbackData =
+    params.status === 'CALLBACK'
+      ? {
+          ...(params.callbackAt !== undefined ? { callbackAt: params.callbackAt } : {}),
+          ...(params.callbackNote !== undefined ? { callbackNote: params.callbackNote } : {}),
+        }
+      : { callbackAt: null, callbackNote: null };
+
   const updated = await prisma.lead.update({
     where: { id: lead.id },
     data: {
       status: params.status,
       ...(params.status === 'CONTACTED' ? { lastContactAt: new Date() } : {}),
+      ...callbackData,
     },
   });
+
+  if (!statusChanged) return updated;
 
   await prisma.leadStatusHistory.create({
     data: {
@@ -567,6 +583,8 @@ export async function changeLeadStatus(params: {
 const STATUS_ORDER: LeadStatus[] = [
   LeadStatus.NEW,
   LeadStatus.CONTACTED,
+  LeadStatus.CALLBACK,
+  LeadStatus.PRICE_HIGH,
   LeadStatus.APPOINTMENT_BOOKED,
   LeadStatus.CLINIC_VISIT,
   LeadStatus.TREATMENT_APPROVED,

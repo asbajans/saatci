@@ -36,6 +36,8 @@ export const LeadsPage: React.FC = () => {
   const [convertForm, setConvertForm] = useState({ ...emptyConvert });
   const [apptLead, setApptLead] = useState<any>(null);
   const [apptForm, setApptForm] = useState({ ...emptyAppointment });
+  const [callbackLead, setCallbackLead] = useState<any>(null);
+  const [callbackForm, setCallbackForm] = useState({ dateTime: '', note: '' });
 
   const canManage = ['ADMIN', 'CALL_CENTER', 'SALES'].includes(user?.role || '');
 
@@ -65,6 +67,7 @@ export const LeadsPage: React.FC = () => {
     queryClient.invalidateQueries({ queryKey: ['leads'] });
     queryClient.invalidateQueries({ queryKey: ['appointments'] });
     queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    queryClient.invalidateQueries({ queryKey: ['lead-reminders'] });
   };
 
   const appointmentMutation = useMutation({
@@ -107,12 +110,48 @@ export const LeadsPage: React.FC = () => {
   });
 
   const statusMutation = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      await api.patch(`/leads/${id}/status`, { status });
+    mutationFn: async ({
+      id,
+      status,
+      callbackAt,
+      callbackNote,
+    }: {
+      id: string;
+      status: string;
+      callbackAt?: string;
+      callbackNote?: string | null;
+    }) => {
+      await api.patch(`/leads/${id}/status`, { status, callbackAt, callbackNote });
     },
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      setCallbackLead(null);
+      setCallbackForm({ dateTime: '', note: '' });
+    },
     onError: (err) => alert(apiError(err)),
   });
+
+  const handleStatusChange = (lead: any, status: string) => {
+    if (status === 'CALLBACK') {
+      setCallbackLead(lead);
+      setCallbackForm({
+        dateTime: toLocalInput(lead.callbackAt || new Date(Date.now() + 3600000)),
+        note: lead.callbackNote || '',
+      });
+      return;
+    }
+    statusMutation.mutate({ id: lead.id, status });
+  };
+
+  const saveCallback = () => {
+    if (!callbackLead || !callbackForm.dateTime) return;
+    statusMutation.mutate({
+      id: callbackLead.id,
+      status: 'CALLBACK',
+      callbackAt: fromLocalInput(callbackForm.dateTime),
+      callbackNote: callbackForm.note.trim() || null,
+    });
+  };
 
   const convertMutation = useMutation({
     mutationFn: async () => {
@@ -185,6 +224,20 @@ export const LeadsPage: React.FC = () => {
                 <td className="px-4 py-3 text-slate-500">{lead.campaign?.name || '-'}</td>
                 <td className="px-4 py-3">
                   <Badge tone={statusTone(lead.status)}>{LEAD_STATUS_LABEL[lead.status]}</Badge>
+                  {lead.status === 'CALLBACK' && lead.callbackAt && (
+                    <p
+                      className={`text-xs mt-1 ${
+                        new Date(lead.callbackAt).getTime() <= Date.now()
+                          ? 'text-red-600 font-semibold'
+                          : 'text-slate-400'
+                      }`}
+                    >
+                      Aranacak: {dateTime(lead.callbackAt)}
+                    </p>
+                  )}
+                  {lead.status === 'CALLBACK' && lead.callbackNote && (
+                    <p className="text-xs text-slate-400 mt-0.5">{lead.callbackNote}</p>
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   {lead.appointments?.[0] ? (
@@ -204,7 +257,7 @@ export const LeadsPage: React.FC = () => {
                     {canManage && (
                       <Select
                         value={lead.status}
-                        onChange={(e) => statusMutation.mutate({ id: lead.id, status: e.target.value })}
+                        onChange={(e) => handleStatusChange(lead, e.target.value)}
                         className="text-xs py-1 max-w-[170px]"
                       >
                         {Object.entries(LEAD_STATUS_LABEL).map(([key, label]) => (
@@ -348,6 +401,40 @@ export const LeadsPage: React.FC = () => {
         </Field>
         <Field label="Not">
           <Input value={apptForm.notes} onChange={(e) => setApptForm({ ...apptForm, notes: e.target.value })} />
+        </Field>
+      </Modal>
+
+      <Modal
+        open={!!callbackLead}
+        onClose={() => setCallbackLead(null)}
+        title={`Tekrar Arama - ${callbackLead?.name || ''}`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setCallbackLead(null)}>
+              Vazgeç
+            </Button>
+            <Button onClick={saveCallback} disabled={!callbackForm.dateTime || statusMutation.isPending}>
+              {statusMutation.isPending ? 'Kaydediliyor...' : 'Hatırlatmayı Kaydet'}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-500">
+          Seçilen tarih ve saatte üst barda hatırlatma oluşur ve sesli uyarı çalar.
+        </p>
+        <Field label="Aranacak Tarih ve Saat *">
+          <Input
+            type="datetime-local"
+            value={callbackForm.dateTime}
+            onChange={(e) => setCallbackForm({ ...callbackForm, dateTime: e.target.value })}
+          />
+        </Field>
+        <Field label="Not">
+          <Input
+            value={callbackForm.note}
+            onChange={(e) => setCallbackForm({ ...callbackForm, note: e.target.value })}
+            placeholder="Örn. Öğleden sonra aranacak"
+          />
         </Field>
       </Modal>
 

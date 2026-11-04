@@ -36,6 +36,9 @@ enum LeadStatus {
   TREATMENT_APPROVED
   APPOINTMENT_BOOKED
   SOLD
+  IRRELEVANT
+  PRICE_HIGH
+  CALLBACK
 }
 
 enum TreatmentPlanStatus {
@@ -261,6 +264,8 @@ model Lead {
   referrer       String?
   rawPayload     Json?
   lastContactAt  DateTime?
+  callbackAt     DateTime?
+  callbackNote   String?
   createdAt      DateTime    @default(now())
 
   appointments   Appointment[]
@@ -275,6 +280,7 @@ model Lead {
   @@index([formId])
   @@index([externalId])
   @@index([createdAt])
+  @@index([status, callbackAt])
 }
 
 model Campaign {

@@ -70,6 +70,9 @@ export const LEAD_STATUS_LABEL: Record<string, string> = {
   TREATMENT_APPROVED: 'Tedavi Onaylandı',
   APPOINTMENT_BOOKED: 'Randevu Alındı',
   SOLD: 'Satıldı',
+  IRRELEVANT: 'Alakasız',
+  PRICE_HIGH: 'Fiyat Yüksek',
+  CALLBACK: 'Tekrar Aranacak',
 };
 
 export const PLAN_STATUS_LABEL: Record<string, string> = {
@@ -120,7 +123,12 @@ export const statusTone = (status: string): Tone => {
     case 'CANCELLED':
     case 'NO_SHOW':
     case 'OVERDUE':
+    case 'IRRELEVANT':
       return 'red';
+    case 'PRICE_HIGH':
+      return 'amber';
+    case 'CALLBACK':
+      return 'violet';
     case 'MEETING':
       return 'violet';
     case 'EXAMINATION':

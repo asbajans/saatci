@@ -4,6 +4,7 @@ export const STORAGE_KEYS = {
   token: 'saatci_token',
   user: 'saatci_user',
   tutorialDismissed: 'saatci_tutorial_dismissed',
+  seenLeadReminders: 'saatci_seen_lead_reminders',
 } as const;
 
 export const ROUTES = {
