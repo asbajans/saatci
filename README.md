@@ -75,7 +75,9 @@ Bu üç değişken doluysa ve veritabanında kullanıcı yoksa ilk açılışta 
 - `INTEGRATION_SECRET`: entegrasyon gizli alanlarını şifrelemek için kullanılır. Boş bırakılırsa `JWT_SECRET` kullanılır.
 - `POSTGRES_PASSWORD`: Docker Compose veritabanı şifresi.
 - `CORS_ORIGIN` ve `PUBLIC_APP_URL`: `https://saatci.asb.web.tr`.
-- `META_APP_SECRET`, `META_VERIFY_TOKEN`, `META_PAGE_ACCESS_TOKEN`.
+- `META_APP_ID`, `META_APP_SECRET`, `META_VERIFY_TOKEN`, `META_PAGE_ACCESS_TOKEN`.
+- `META_GRAPH_API_VERSION` (varsayılan `v26.0`), `META_PAGE_ID`, `META_AD_ACCOUNT_ID`, `META_SYNC_INTERVAL_MINUTES`.
+- OAuth otomatik kurulumu için `META_OAUTH_REDIRECT_URI` ve gerekirse `META_OAUTH_SCOPES`.
 
 Entegrasyon gizli alanları (access token, API secret vb.) veritabanında AES-256-GCM ile şifrelenir ve API yanıtlarında maskelenir.
 
@@ -91,12 +93,13 @@ Yönetici panelinde **Entegrasyon & Kampanya** ekranını açın.
 
 ### Meta Lead Ads
 
-- Facebook Sayfa ID, Page Access Token ve webhook doğrulama anahtarı girin.
-- Meta uygulamasında webhook adresi: `https://saatci.asb.web.tr/api/webhooks/meta/leadads`
+- **Meta Reklamlar > Otomatik Meta Bağlantısı** kartından **Meta ile Bağlan** veya **Token ile Otomatik Kur** kullanın. Sayfa, reklam hesabı, pixel, sayfa `subscribed_apps` aboneliği ve uygulama webhook kaydı otomatik yapılır.
+- Meta uygulamasında genel webhook adresi: `https://saatci.asb.web.tr/api/webhooks/meta`
 - Doğrulama anahtarı `META_VERIFY_TOKEN` veya entegrasyon içindeki `verifyToken` ile aynı olmalıdır.
 - Gelen lead `leadgen_id` ile tekrar kontrol edilir; telefon numarası bulunursa lead otomatik oluşturulur.
-- Varsayılan kampanya seçilirse lead o kampanyaya bağlanır. Aksi halde reklam kimliği kampanya `externalId` alanıyla eşleştirilir.
-- **Meta kampanya ve lead senkronizasyonu**: Yönetici panelinde **Entegrasyon & Kampanya > Meta Reklamlar** sekmesinden Meta üzerindeki kampanyaları ve leadleri CRM'ye çekebilirsiniz. Gerekli environment değişkenleri: `META_PAGE_ACCESS_TOKEN` ve `META_AD_ACCOUNT_ID` (veya META_LEAD_ADS entegrasyonunda Sayfa Erişim Tokenı ve Reklam Hesap ID).
+- **Meta Tanılama** kartı token, sayfa aboneliği, webhook, form erişimi ve CAPI durumunu gösterir.
+- Arka plan senkronizasyonu `META_SYNC_INTERVAL_MINUTES` (varsayılan 5 dk) ile kaçırılan lead'leri tamamlar.
+- Eski/özel `https://saatci.asb.web.tr/api/webhooks/meta/leadads` adresi de desteklenir.
 
 ### Messenger, Instagram DM ve WhatsApp
 

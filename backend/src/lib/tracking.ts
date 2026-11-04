@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { ConversionEventType, IntegrationType, LeadStatus, Prisma, TrackingStatus } from '@prisma/client';
 import { prisma } from './prisma';
 import { decryptConfig } from './secrets';
+import { graphRequest } from './graph';
 
 const OUTBOUND_TYPES: IntegrationType[] = [
   IntegrationType.META_CAPI,
@@ -173,10 +174,11 @@ async function sendToIntegration(
         access_token: accessToken,
       };
       if (config.testEventCode) body.test_event_code = config.testEventCode;
-      const response = await fetchJson(`https://graph.facebook.com/v20.0/${encodeURIComponent(pixelId)}/events`, {
+      const response = await graphRequest({
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        path: `${encodeURIComponent(pixelId)}/events`,
+        body,
+        timeoutMs: 15000,
       });
       return { response };
     }

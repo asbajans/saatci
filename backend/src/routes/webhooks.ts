@@ -4,21 +4,47 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import { prisma } from '../lib/prisma';
 import { decryptConfig } from '../lib/secrets';
 import { recordLeadCreated, resolveCampaignId } from '../lib/tracking';
+import { graphRequest } from '../lib/graph';
 
 const router = Router();
-
-const verifyTokenQuery = {
-  'hub.mode': 'query',
-  'hub.challenge': 'query',
-  'hub.verify_token': 'query',
-} as const;
 
 async function integrationConfig(type: string) {
   const integration = await prisma.integration.findFirst({
     where: { type: type as any, isActive: true },
     orderBy: { createdAt: 'desc' },
   });
-  return integration ? { integration, config: decryptConfig(integration.config) } : null;
+  if (!integration) return null;
+  try {
+    return { integration, config: decryptConfig(integration.config) };
+  } catch (error) {
+    console.error(`[webhooks] ${integration.id} config şifresi çözülemedi`, error);
+    return null;
+  }
+}
+
+async function integrationConfigForPage(type: string, pageId?: string) {
+  const integrations = await prisma.integration.findMany({
+    where: { type: type as any, isActive: true },
+    orderBy: { createdAt: 'desc' },
+  });
+  const entries: { integration: (typeof integrations)[number]; config: Record<string, any> }[] = [];
+  for (const integration of integrations) {
+    try {
+      entries.push({ integration, config: decryptConfig(integration.config) });
+    } catch (error) {
+      console.error(`[webhooks] ${integration.id} config şifresi çözülemedi`, error);
+    }
+  }
+
+  if (pageId) {
+    const exact = entries.find((row) => String(row.config.pageId || '') === pageId);
+    if (exact) return exact;
+    const legacy = entries.find((row) => !String(row.config.pageId || '').trim());
+    if (legacy) return legacy;
+    return null;
+  }
+
+  return entries[0] || null;
 }
 
 async function validVerifyToken(token: string) {
@@ -45,16 +71,19 @@ function verifySignature(req: Request) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-function challengeHandler(req: Request, res: Response) {
+async function challengeHandler(req: Request, res: Response) {
   const mode = String(req.query['hub.mode'] || '');
   const challenge = String(req.query['hub.challenge'] || '');
   const token = String(req.query['hub.verify_token'] || '');
-  void validVerifyToken(token).then((valid) => {
-    if (mode === 'subscribe' && valid) return res.status(200).send(challenge);
-    return res.status(403).json({ success: false, message: 'Doğrulama başarısız' });
-  });
+  const valid = await validVerifyToken(token);
+  if (mode === 'subscribe' && valid) return res.status(200).send(challenge);
+  return res.status(403).json({ success: false, message: 'Doğrulama başarısız' });
 }
 
+router.get(
+  '/meta',
+  asyncHandler(async (req: Request, res: Response) => challengeHandler(req, res))
+);
 router.get(
   '/meta/leadads',
   asyncHandler(async (req: Request, res: Response) => challengeHandler(req, res))
@@ -90,6 +119,14 @@ type LeadPayload = {
 
 async function createInboundLead(payload: LeadPayload) {
   if (!payload.phone || payload.phone.trim().length < 5) return null;
+
+  if (payload.externalId) {
+    const existing = await prisma.lead.findFirst({
+      where: { externalId: payload.externalId, source: payload.source },
+    });
+    if (existing) return { lead: existing, created: false };
+  }
+
   const campaignId = await resolveCampaignId({ campaignId: payload.campaignId });
   const lead = await prisma.lead.create({
     data: {
@@ -104,7 +141,7 @@ async function createInboundLead(payload: LeadPayload) {
     },
   });
   await recordLeadCreated(lead);
-  return lead;
+  return { lead, created: true };
 }
 
 async function logInbound(
@@ -129,6 +166,8 @@ async function logInbound(
 async function processLeadAds(body: any) {
   const entries = Array.isArray(body?.entry) ? body.entry : [];
   for (const entry of entries) {
+    const pageId = String(entry?.id || '');
+    const configInfo = await integrationConfigForPage('META_LEAD_ADS', pageId);
     const changes = Array.isArray(entry?.changes) ? entry.changes : [];
     for (const change of changes) {
       if (change?.field !== 'leadgen') continue;
@@ -141,7 +180,6 @@ async function processLeadAds(body: any) {
       });
       if (existing) continue;
 
-      const configInfo = await integrationConfig('META_LEAD_ADS');
       const accessToken =
         configInfo?.config.pageAccessToken || process.env.META_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
       if (!accessToken) {
@@ -153,13 +191,14 @@ async function processLeadAds(body: any) {
       }
 
       try {
-        const response = await fetch(
-          `https://graph.facebook.com/v20.0/${encodeURIComponent(leadgenId)}?access_token=${encodeURIComponent(
-            String(accessToken)
-          )}`
-        );
-        const data = (await response.json()) as any;
-        if (!response.ok) throw new Error(data?.error?.message || `Meta API hatası (${response.status})`);
+        const data = await graphRequest<any>({
+          path: encodeURIComponent(leadgenId),
+          accessToken: String(accessToken),
+          params: {
+            fields:
+              'id,created_time,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,form_name,platform,is_organic,field_data',
+          },
+        });
 
         const fieldMap: Record<string, string> = {};
         for (const field of data.field_data || []) {
@@ -175,15 +214,37 @@ async function processLeadAds(body: any) {
         const email = fieldMap.email || fieldMap.email_address || null;
 
         let campaignId = configInfo?.config.campaignId || null;
-        if (!campaignId && value.ad_id) {
+        const metaCampaignId = data.campaign_id || value.campaign_id;
+        const metaAdId = data.ad_id || value.ad_id;
+        if (!campaignId && metaCampaignId) {
           const campaign = await prisma.campaign.findFirst({
-            where: { externalId: String(value.ad_id) },
+            where: { externalId: String(metaCampaignId) },
+            select: { id: true },
+          });
+          campaignId =
+            campaign?.id ||
+            (
+              await prisma.campaign.create({
+                data: {
+                  externalId: String(metaCampaignId),
+                  name: data.campaign_name || value.campaign_name || 'Meta Kampanya',
+                  channel: 'Meta',
+                  platform: 'Meta',
+                  utmCampaign: data.campaign_name || value.campaign_name || null,
+                  isActive: true,
+                },
+              })
+            ).id;
+        }
+        if (!campaignId && metaAdId) {
+          const campaign = await prisma.campaign.findFirst({
+            where: { externalId: String(metaAdId) },
             select: { id: true },
           });
           campaignId = campaign?.id || null;
         }
 
-        const lead = await createInboundLead({
+        const result = await createInboundLead({
           name: fullName,
           phone,
           email,
@@ -193,9 +254,9 @@ async function processLeadAds(body: any) {
           raw: { value, field_data: data.field_data, form_id: data.form_id },
         });
         await logInbound('META_LEAD_ADS', leadgenId, body, {
-          status: lead ? 'PROCESSED' : 'FAILED',
-          error: lead ? undefined : 'Telefon numarası bulunamadı',
-          leadId: lead?.id,
+          status: result ? 'PROCESSED' : 'FAILED',
+          error: result ? undefined : 'Telefon numarası bulunamadı',
+          leadId: result?.lead.id,
         });
       } catch (error) {
         await logInbound('META_LEAD_ADS', leadgenId, body, {
@@ -210,8 +271,14 @@ async function processLeadAds(body: any) {
 async function processMessaging(body: any, type: 'META_MESSENGER' | 'INSTAGRAM_DM') {
   const entries = Array.isArray(body?.entry) ? body.entry : [];
   for (const entry of entries) {
+    const pageId = String(entry?.id || '');
+    const configInfo =
+      type === 'META_MESSENGER'
+        ? await integrationConfigForPage(type, pageId)
+        : await integrationConfig(type);
     const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
     for (const item of messaging) {
+      if (item?.message?.is_echo) continue;
       const messageId = String(item?.message?.mid || '');
       if (!messageId) continue;
       const existing = await prisma.inboundEvent.findFirst({
@@ -221,8 +288,7 @@ async function processMessaging(body: any, type: 'META_MESSENGER' | 'INSTAGRAM_D
 
       const text = String(item?.message?.text || '');
       const phone = extractPhone(text);
-      const configInfo = await integrationConfig(type);
-      const lead = phone
+      const result = phone
         ? await createInboundLead({
             name: type === 'INSTAGRAM_DM' ? 'Instagram DM' : 'Messenger DM',
             phone,
@@ -234,9 +300,9 @@ async function processMessaging(body: any, type: 'META_MESSENGER' | 'INSTAGRAM_D
         : null;
 
       await logInbound(type, messageId, body, {
-        status: lead ? 'PROCESSED' : 'IGNORED',
-        error: lead ? undefined : 'Mesajda telefon numarası bulunamadı; yalnızca olay kaydedildi',
-        leadId: lead?.id,
+        status: result ? 'PROCESSED' : 'IGNORED',
+        error: result ? undefined : 'Mesajda telefon numarası bulunamadı; yalnızca olay kaydedildi',
+        leadId: result?.lead.id,
       });
     }
   }
@@ -261,7 +327,7 @@ async function processWhatsApp(body: any) {
         const phone = String(message?.from || '');
         const contact = contacts.find((c: any) => c?.wa_id === phone);
         const configInfo = await integrationConfig('WHATSAPP');
-        const lead = await createInboundLead({
+        const result = await createInboundLead({
           name: contact?.profile?.name || 'WhatsApp Lead',
           phone,
           source: 'WhatsApp',
@@ -270,58 +336,95 @@ async function processWhatsApp(body: any) {
           raw: message,
         });
         await logInbound('WHATSAPP', messageId, body, {
-          status: lead ? 'PROCESSED' : 'FAILED',
-          error: lead ? undefined : 'Telefon numarası bulunamadı',
-          leadId: lead?.id,
+          status: result ? 'PROCESSED' : 'FAILED',
+          error: result ? undefined : 'Telefon numarası bulunamadı',
+          leadId: result?.lead.id,
         });
       }
     }
   }
 }
 
-router.post(
-  '/meta/leadads',
-  asyncHandler(async (req: Request, res: Response) => {
-    if (!verifySignature(req)) {
-      return res.status(403).json({ success: false, message: 'Meta imzası doğrulanamadı' });
-    }
-    await processLeadAds(req.body);
-    res.sendStatus(200);
-  })
-);
+function processInBackground(task: Promise<unknown>) {
+  void task.catch((error) => {
+    console.error('[webhooks] olay işlenemedi', error);
+  });
+}
 
-router.post(
-  '/meta/messenger',
-  asyncHandler(async (req: Request, res: Response) => {
-    if (!verifySignature(req)) {
-      return res.status(403).json({ success: false, message: 'Meta imzası doğrulanamadı' });
-    }
-    await logInbound('META_MESSENGER', null, req.body, { status: 'PENDING' });
-    await processMessaging(req.body, 'META_MESSENGER');
-    res.sendStatus(200);
-  })
-);
+async function routeMetaWebhook(body: any) {
+  const object = String(body?.object || '');
+  const entries = Array.isArray(body?.entry) ? body.entry : [];
 
-router.post(
-  '/meta/instagram',
-  asyncHandler(async (req: Request, res: Response) => {
-    if (!verifySignature(req)) {
-      return res.status(403).json({ success: false, message: 'Meta imzası doğrulanamadı' });
+  if (object === 'page') {
+    const hasLeadgen = entries.some((entry: any) =>
+      (Array.isArray(entry?.changes) ? entry.changes : []).some((change: any) => change?.field === 'leadgen')
+    );
+    const hasMessaging = entries.some((entry: any) => Array.isArray(entry?.messaging) && entry.messaging.length > 0);
+    if (hasLeadgen) await processLeadAds(body);
+    if (hasMessaging) await processMessaging(body, 'META_MESSENGER');
+    if (!hasLeadgen && !hasMessaging) {
+      await logInbound('META_PAGE', null, body, {
+        status: 'IGNORED',
+        error: 'Desteklenmeyen page olayı',
+      });
     }
-    await processMessaging(req.body, 'INSTAGRAM_DM');
-    res.sendStatus(200);
-  })
-);
+    return;
+  }
 
-router.post(
-  '/whatsapp',
-  asyncHandler(async (req: Request, res: Response) => {
-    if (!verifySignature(req)) {
-      return res.status(403).json({ success: false, message: 'Meta imzası doğrulanamadı' });
-    }
-    await processWhatsApp(req.body);
-    res.sendStatus(200);
-  })
-);
+  if (object === 'instagram') {
+    await processMessaging(body, 'INSTAGRAM_DM');
+    return;
+  }
+
+  if (object === 'whatsapp_business_account') {
+    await processWhatsApp(body);
+    return;
+  }
+
+  await logInbound('META_UNKNOWN', null, body, {
+    status: 'IGNORED',
+    error: `Desteklenmeyen object: ${object || 'bilinmiyor'}`,
+  });
+}
+
+router.post('/meta', (req: Request, res: Response) => {
+  if (!verifySignature(req)) {
+    return res.status(403).json({ success: false, message: 'Meta imzası doğrulanamadı' });
+  }
+  res.sendStatus(200);
+  processInBackground(routeMetaWebhook(req.body));
+});
+
+router.post('/meta/leadads', (req: Request, res: Response) => {
+  if (!verifySignature(req)) {
+    return res.status(403).json({ success: false, message: 'Meta imzası doğrulanamadı' });
+  }
+  res.sendStatus(200);
+  processInBackground(processLeadAds(req.body));
+});
+
+router.post('/meta/messenger', (req: Request, res: Response) => {
+  if (!verifySignature(req)) {
+    return res.status(403).json({ success: false, message: 'Meta imzası doğrulanamadı' });
+  }
+  res.sendStatus(200);
+  processInBackground(processMessaging(req.body, 'META_MESSENGER'));
+});
+
+router.post('/meta/instagram', (req: Request, res: Response) => {
+  if (!verifySignature(req)) {
+    return res.status(403).json({ success: false, message: 'Meta imzası doğrulanamadı' });
+  }
+  res.sendStatus(200);
+  processInBackground(processMessaging(req.body, 'INSTAGRAM_DM'));
+});
+
+router.post('/whatsapp', (req: Request, res: Response) => {
+  if (!verifySignature(req)) {
+    return res.status(403).json({ success: false, message: 'Meta imzası doğrulanamadı' });
+  }
+  res.sendStatus(200);
+  processInBackground(processWhatsApp(req.body));
+});
 
 export default router;

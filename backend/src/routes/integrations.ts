@@ -6,6 +6,15 @@ import { authMiddleware, roleGuard } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { decryptConfig, encryptConfig, mergeSecrets, redactConfig } from '../lib/secrets';
 import { syncMetaCampaigns, syncMetaLeads } from '../lib/meta';
+import {
+  buildMetaOAuthUrl,
+  connectMetaAssets,
+  diagnoseMeta,
+  exchangeMetaCode,
+  metaOAuthSettings,
+  signMetaOAuthState,
+  verifyMetaOAuthState,
+} from '../lib/metaConnect';
 
 const router = Router();
 
@@ -65,8 +74,131 @@ function serializeIntegration(integration: {
   };
 }
 
+function adminRedirect(params: Record<string, string>) {
+  const publicUrl = (process.env.PUBLIC_APP_URL || `http://localhost:${process.env.PORT || 3001}`).replace(/\/+$/, '');
+  const query = new URLSearchParams(params);
+  return `${publicUrl}/integrations?${query.toString()}`;
+}
+
+router.get(
+  '/meta/oauth/callback',
+  asyncHandler(async (req: Request, res: Response) => {
+    const error = String(req.query.error_description || req.query.error || '');
+    if (error) {
+      return res.redirect(adminRedirect({ meta: 'error', message: error }));
+    }
+
+    const state = verifyMetaOAuthState(String(req.query.state || ''));
+    if (!state) {
+      return res.redirect(adminRedirect({ meta: 'error', message: 'OAuth doğrulama anahtarı geçersiz' }));
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: state.userId } });
+    if (!user || user.role !== 'ADMIN') {
+      return res.redirect(adminRedirect({ meta: 'error', message: 'Bu işlem için yönetici yetkisi gerekli' }));
+    }
+
+    const code = String(req.query.code || '');
+    if (!code) {
+      return res.redirect(adminRedirect({ meta: 'error', message: 'Meta yetkilendirme kodu alınamadı' }));
+    }
+
+    try {
+      const accessToken = await exchangeMetaCode(code);
+      const result = await connectMetaAssets({
+        accessToken,
+        userId: user.id,
+        namePrefix: 'Meta',
+      });
+      const message = `${result.pages.length} sayfa ve ${result.pixels.length} pixel bağlandı`;
+      return res.redirect(adminRedirect({ meta: 'connected', message }));
+    } catch (err) {
+      return res.redirect(
+        adminRedirect({ meta: 'error', message: err instanceof Error ? err.message : String(err) })
+      );
+    }
+  })
+);
+
 router.use(authMiddleware);
 router.use(roleGuard('ADMIN'));
+
+router.get(
+  '/meta/oauth/url',
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = (req as Request & { user?: { id: string } }).user?.id;
+    if (!userId) return res.status(401).json({ success: false, message: 'Oturum gerekli' });
+    const settings = metaOAuthSettings();
+    if (!settings.configured) {
+      return res.status(400).json({
+        success: false,
+        message: 'META_APP_ID ve META_APP_SECRET tanımlanmadan otomatik bağlantı başlatılamaz',
+      });
+    }
+    const state = signMetaOAuthState(userId);
+    res.json({
+      success: true,
+      data: {
+        url: buildMetaOAuthUrl(state),
+        redirectUri: settings.redirectUri,
+        scopes: settings.scopes,
+      },
+    });
+  })
+);
+
+router.post(
+  '/meta/auto-setup',
+  asyncHandler(async (req: Request, res: Response) => {
+    const data = z
+      .object({
+        accessToken: z.string().optional(),
+        pageId: z.string().optional(),
+        adAccountId: z.string().optional(),
+        pixelId: z.string().optional(),
+        namePrefix: z.string().optional(),
+      })
+      .parse(req.body);
+
+    let accessToken = data.accessToken?.trim();
+    if (!accessToken) {
+      const leadAds = await prisma.integration.findFirst({
+        where: { type: 'META_LEAD_ADS' as any, isActive: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      const config = leadAds ? decryptConfig(leadAds.config) : {};
+      accessToken = String(
+        config.pageAccessToken || process.env.META_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || ''
+      );
+    }
+
+    if (!accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'Meta erişim tokenı gerekli (Page Access Token veya sistem kullanıcı tokenı)',
+      });
+    }
+
+    const result = await connectMetaAssets({
+      accessToken,
+      pageId: data.pageId,
+      adAccountId: data.adAccountId,
+      pixelId: data.pixelId,
+      userId: (req as Request & { user?: { id: string } }).user?.id,
+      namePrefix: data.namePrefix,
+    });
+
+    res.json({ success: true, data: result });
+  })
+);
+
+router.get(
+  '/meta/diagnostics',
+  asyncHandler(async (_req: Request, res: Response) => {
+    const result = await diagnoseMeta();
+    res.json({ success: true, data: result });
+  })
+);
 
 router.get(
   '/',
@@ -196,28 +328,33 @@ router.post(
       .object({
         accessToken: z.string().optional(),
         adAccountId: z.string().optional(),
+        pageId: z.string().optional(),
       })
       .parse(req.body);
 
     const leadAds = await prisma.integration.findFirst({
       where: { type: 'META_LEAD_ADS' as any, isActive: true },
+      orderBy: { createdAt: 'desc' },
     });
+    const config = leadAds ? decryptConfig(leadAds.config) : {};
 
     const accessToken =
       data.accessToken ||
-      (leadAds?.config as any)?.pageAccessToken ||
-      process.env.META_PAGE_ACCESS_TOKEN ||
-      process.env.META_ACCESS_TOKEN;
+      config.adsAccessToken ||
+      process.env.META_ACCESS_TOKEN ||
+      config.pageAccessToken ||
+      process.env.META_PAGE_ACCESS_TOKEN;
 
     const adAccountId =
       data.adAccountId ||
-      (leadAds?.config as any)?.adAccountId ||
+      config.adAccountId ||
       process.env.META_AD_ACCOUNT_ID;
 
-    if (!accessToken || !adAccountId) {
+    if (!accessToken) {
       return res.status(400).json({
         success: false,
-        message: 'Meta sayfa erişim tokenı ve reklam hesabı ID gerekli (META_AD_ACCOUNT_ID)',
+        message:
+          'Meta erişim tokenı gerekli (ads_read yetkili kullanıcı/sistem tokenı veya entegrasyon kaydı)',
       });
     }
 
@@ -234,32 +371,33 @@ router.post(
       .object({
         accessToken: z.string().optional(),
         adAccountId: z.string().optional(),
+        pageId: z.string().optional(),
       })
       .parse(req.body);
 
     const leadAds = await prisma.integration.findFirst({
       where: { type: 'META_LEAD_ADS' as any, isActive: true },
+      orderBy: { createdAt: 'desc' },
     });
+    const config = leadAds ? decryptConfig(leadAds.config) : {};
 
     const accessToken =
       data.accessToken ||
-      (leadAds?.config as any)?.pageAccessToken ||
+      config.pageAccessToken ||
       process.env.META_PAGE_ACCESS_TOKEN ||
       process.env.META_ACCESS_TOKEN;
 
-    const adAccountId =
-      data.adAccountId ||
-      (leadAds?.config as any)?.adAccountId ||
-      process.env.META_AD_ACCOUNT_ID;
+    const pageId = data.pageId || config.pageId || process.env.META_PAGE_ID;
+    const adAccountId = data.adAccountId || config.adAccountId || process.env.META_AD_ACCOUNT_ID;
 
-    if (!accessToken || !adAccountId) {
+    if (!accessToken) {
       return res.status(400).json({
         success: false,
-        message: 'Meta sayfa erişim tokenı ve reklam hesabı ID gerekli (META_AD_ACCOUNT_ID)',
+        message: 'Meta sayfa erişim tokenı gerekli (META_PAGE_ACCESS_TOKEN veya entegrasyon kaydı)',
       });
     }
 
-    const result = await syncMetaLeads({ accessToken, adAccountId });
+    const result = await syncMetaLeads({ accessToken, pageId, adAccountId });
     res.json({ success: true, data: result });
   })
 );

@@ -21,6 +21,7 @@ import settingsRoutes from './routes/settings';
 import scheduleRoutes from './routes/schedule';
 import integrationRoutes from './routes/integrations';
 import formRoutes, { publicFormsRouter } from './routes/forms';
+import { startMetaLeadSyncJob } from './lib/metaSyncJob';
 
 dotenv.config();
 
@@ -98,6 +99,7 @@ async function start() {
   }
   app.listen(PORT, () => {
     console.log(`Saatci CRM Backend running on http://localhost:${PORT}`);
+    startMetaLeadSyncJob();
   });
 }
 

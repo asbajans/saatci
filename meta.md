@@ -2,7 +2,7 @@
 
 Bu belge, Meta (Facebook / Instagram / WhatsApp) Lead Ads, Messenger, Instagram DM, WhatsApp ve Conversions API entegrasyonunun adım adım nasıl kurulacağını açıklar. Tüm değerlerin nereden alınacağı, CRM panelinin hangi alanına girileceği ve ne işe yaradığı burada toplanmıştır.
 
-Kod tabanında Meta Graph API sürümü **v20.0** kullanılmıştır (`backend/src/lib/meta.ts`). Meta yeni bir sürüm çıkarsa bu değeri güncelleyebilirsiniz.
+Kod tabanında varsayılan Meta Graph API sürümü **v26.0**'dır (`META_GRAPH_API_VERSION` ortam değişkeni ile değiştirilebilir). **v20.0 24 Eylül 2026'da kullanımdan kaldırıldı**; eski sürümle yapılan lead çekme ve Conversions API çağrıları başarısız olur.
 
 ---
 
@@ -39,24 +39,28 @@ Kod tabanında Meta Graph API sürümü **v20.0** kullanılmıştır (`backend/s
 
 1. [https://developers.facebook.com](https://developers.facebook.com) adresine girin.
 2. **My Apps > Create App** seçin.
-3. Kullanım amacı olarak **Business** seçin.
+3. "What are you building?" ekranında **Business** veya **Other** seçin.
 4. Uygulama adını ve e-posta adresini girin ve oluşturun.
+
+### Use case (kullanım amacı) seçimi
+
+Yeni geliştirici portalında uygulama oluştururken hangi işlevleri kullanacağınızı seçmeniz istenir. CRM akışınız için aşağıdaki use case'leri işaretleyin:
+
+- **Lead Generation / Lead Ads** — Meta Lead Ads formlarından gelen leadleri almak için
+- **Messaging** — Messenger ve Instagram DM mesajlarını almak için
+- **WhatsApp** — WhatsApp Cloud API mesajlarını almak için
+- **Marketing API** — Kampanya, reklam ve senkronizasyon verilerini çekmek için
+
+MCP sunucu seçmeniz **gerekmez**. CRM zaten Graph API webhook ve senkronizasyon endpointlerine sahip; MCP yalnızca bir AI asistanının Meta API üzerinden işlem yapmasını sağlar. Gereksiz use case seçmeyin, aksi takdirde Meta inceleme süreci daha kapsamlı olur.
 
 Oluşturulduktan sonra şu değerleri not edin:
 
 | Değer | Nereden bulunur | CRM'deki karşılığı | Ne işe yarar |
 |-------|----------------|-------------------|--------------|
-| **App ID** | Uygulama kontrol panelinin üst kısmı | `META_APP_ID` | Meta uygulamasının benzersiz kimliği |
-| **App Secret** | Ayarlar > Temel bilgiler > Gizli anahtar | `META_APP_SECRET` | Webhook imza doğrulaması (`X-Hub-Signature-256`) |
+| **App ID** | Uygulama kontrol panelinin üst kısmı veya Settings > Basic | `META_APP_ID` | Meta uygulamasının benzersiz kimliği |
+| **App Secret** | Settings > Basic > App Secret (Gizli Anahtar) | `META_APP_SECRET` | Webhook imza doğrulaması (`X-Hub-Signature-256`) |
 
-Kullanım amacı (use case) seçiminde sadece **MCP / Meta Conversions API** seçmek yeterli değildir. CRM akışınız için şunları ekleyin:
-
-- **Lead Ads** (form leadlerinin çekilmesi)
-- **Messenger** / **Instagram DM** (DM üzerinden lead oluşturma)
-- **WhatsApp Business** (WhatsApp üzerinden lead oluşturma)
-- **Marketing API** (reklam verileri, kampanya senkronizasyonu)
-
-Üretimde bu izinler için Meta'dan **App Review / Business Verification** onayı gerekebilir.
+Üretimde seçtiğiniz use case'ler için Meta'dan **App Review / Business Verification** onayı gerekebilir.
 
 ---
 
@@ -73,6 +77,20 @@ Meta Lead Ads ve Conversions API için bir sayfa erişim tokenına ihtiyacınız
    - Meta Pixel (Conversions API)
 5. Sistem kullanıcısına erişim tokenı oluşturun ve kopyalayın. Bu değer `META_PAGE_ACCESS_TOKEN` (veya `META_ACCESS_TOKEN`) olarak CRM'ye girilir.
 
+### Sayfayı uygulamaya abone etme (en sık atlanan adım)
+
+Webhook doğrulaması tek başına yeterli değildir. Meta'nın lead olaylarını göndermesi için Facebook Sayfası'nın uygulamaya abone olması gerekir:
+
+```bash
+curl -X POST "https://graph.facebook.com/v26.0/{page-id}/subscribed_apps" \
+  -d "subscribed_fields=leadgen,messaging" \
+  -d "access_token={page-access-token}"
+```
+
+CRM panelindeki **Meta ile Bağlan** veya **Token ile Otomatik Kur** düğmeleri bu adımı sizin yerinize yapar. Elle yapıldıysa **Meta Tanılama** ekranında "sayfa uygulamaya abone" satırı yeşil olmalıdır.
+
+> Güvenlik: Daha önce bu dosyada paylaşılan erişim tokenı kaldırılmıştır. Token git geçmişinde görünüyorsa **Meta Business Suite > Sistem Kullanıcıları** bölümünden iptal edip yenisini oluşturun. Tokenları asla dokümana veya depoya yazmayın.
+
 Alternatif olarak, Events Manager'da **Conversions API > Erişim Jetonu Oluştur** yolunu da kullanabilirsiniz.
 
 ---
@@ -81,9 +99,9 @@ Alternatif olarak, Events Manager'da **Conversions API > Erişim Jetonu Oluştur
 
 1. [https://business.facebook.com](https://business.facebook.com) > **Reklam Hesapları** sayfasına gidin.
 2. Reklam hesabınızın ID'sini kopyalayın. Şekli genellikle `1234567890123456` şeklindedir.
-3. CRM'de `META_AD_ACCOUNT_ID` alanına **`act_` ön ekini ekleyerek** girin.
+3. CRM'de `META_AD_ACCOUNT_ID` alanına `act_` ön ekiyle veya öneksiz girin; CRM otomatik normalize eder.
 
-Örnek: `act_1234567890123456`
+Örnek: `act_1234567890123456` veya `1234567890123456`
 
 Bu değer, Meta'dan kampanya ve lead senkronizasyonu yapılırken hangi reklam hesabının kullanılacağını belirtir.
 
@@ -120,30 +138,39 @@ Conversions API çağrıları için erişim tokenı gerekir. Önerilen yöntem *
 
 ## Adım 6: Webhook Callback URL ve Verify Token
 
-Meta'dan gelen gerçek zamanlı lead ve mesaj olaylarını CRM'e almak için webhook kurmalısınız.
-
-CRM'de şu endpoint'ler mevcuttur:
+Meta'dan gelen gerçek zamanlı lead ve mesaj olaylarını CRM'e almak için webhook kurmalısınız. Güncel önerilen yöntem, **tek bir genel callback** kullanmaktır:
 
 | Webhook Türü | URL |
 |-------------|-----|
-| Meta Lead Ads | `https://saatci.asb.web.tr/api/webhooks/meta/leadads` |
+| Genel (Page / Instagram / WhatsApp) | `https://saatci.asb.web.tr/api/webhooks/meta` |
+| Meta Lead Ads (eski/özel) | `https://saatci.asb.web.tr/api/webhooks/meta/leadads` |
 | Facebook Messenger | `https://saatci.asb.web.tr/api/webhooks/meta/messenger` |
 | Instagram DM | `https://saatci.asb.web.tr/api/webhooks/meta/instagram` |
 | WhatsApp Cloud API | `https://saatci.asb.web.tr/api/webhooks/whatsapp` |
 
 ### Uygulamada Webhook Ekleme
 
-1. [https://developers.facebook.com](https://developers.facebook.com) > Uygulamanız > **Webhooklar** bölümüne gidin.
-2. **Webhook Ekle** seçin.
-3. Aşağıdaki objeleri işaretleyin:
-   - `leadgen` (Lead Ads için)
-   - `messaging` (Messenger / Instagram DM için)
-   - `whatsapp_messages` (WhatsApp için)
-4. **Callback URL** alanına yukarıdaki ilgili URL'yi yazın.
-5. **Verify Token** alanına `META_VERIFY_TOKEN` değerini yazın (ör. `saatci_verify_token_change_me` veya kendi belirlediğiniz gizli anahtar).
-6. Kaydedin ve aboneliği onaylayın.
+1. [https://developers.facebook.com](https://developers.facebook.com) > Uygulamanız > **Webhooks** bölümüne gidin.
+2. **Page** objesini seçin ve `leadgen` ile `messaging` alanlarına abone olun.
+3. **Callback URL** alanına `https://saatci.asb.web.tr/api/webhooks/meta` yazın.
+4. **Verify Token** alanına `META_VERIFY_TOKEN` değerini yazın.
+5. Kaydedin ve aboneliği onaylayın.
+6. **Sayfayı uygulamaya abone edin** (yukarıdaki `subscribed_apps` adımı). Bu yapılmazsa doğrulama başarılı olsa bile hiçbir lead webhook'u gelmez.
 
-> Webhook imza doğrulaması `META_APP_SECRET` tanımlıysa `X-Hub-Signature-256` ile yapılır. Bu yüzden `META_APP_SECRET` değerini de CRM env dosyasına girmeniz gerekir.
+> Webhook imza doğrulaması `META_APP_SECRET` tanımlıysa `X-Hub-Signature-256` ile yapılır. `META_APP_SECRET` yanlışsa Meta istekleri 403 alır ve hiçbir olay işlenmez.
+
+### Otomatik Kurulum (Önerilen)
+
+Panelde **Entegrasyon & Kampanya > Meta Reklamlar** sekmesinde iki yöntem vardır:
+
+- **Meta ile Bağlan**: Facebook Login for Business OAuth akışı açar. Sayfa, reklam hesabı ve pixel otomatik keşfedilir; sayfa `subscribed_apps` ile uygulamaya abone edilir ve uygulama webhook aboneliği API ile kurulur.
+- **Token ile Otomatik Kur**: Elinizde sistem kullanıcı tokenı varsa sayfa/reklam hesabı/pixel keşfi, sayfa aboneliği ve webhook kaydı tek tıkla yapılır.
+
+OAuth kullanacaksanız Meta uygulamasında **Facebook Login for Business** ürününü ekleyip **Valid OAuth Redirect URIs** alanına panelde gösterilen adresi yazın. Gerekli izinler: `pages_show_list`, `pages_read_engagement`, `pages_manage_metadata`, `leads_retrieval`, `ads_read`, `business_management`.
+
+### Arka Plan Senkronizasyonu
+
+Webhook'lar sessizce kaybolabilir. CRM, `META_SYNC_INTERVAL_MINUTES` (varsayılan 5 dakika) aralığıyla `/{page-id}/leadgen_forms` → `/{form-id}/leads` uçlarını kullanarak lead'leri ayrıca çeker. Böylece webhook çalışmasa bile lead'ler CRM'e düşer. Meta lead verilerini yalnızca **90 gün** sakladığı için bu yedek senkronizasyon önemlidir.
 
 ---
 
@@ -155,7 +182,7 @@ Yönetici panelinde **Entegrasyon & Kampanya > Entegrasyonlar** ekranından yeni
 |-----------------|-------------|---------------|--------------|
 | **Meta Pixel (Web)** | Pixel ID | Events Manager > Piksel Ayarları | Web formu sayfasında Meta Pixel yükleme ve `PageView` olayı |
 | **Meta Conversions API** | Pixel ID, Access Token, Test Event Code | Events Manager > Conversions API > Erişim Jetonu | Sunucudan Lead, Contact, Schedule, ClinicVisit, TreatmentApproved, Purchase olaylarını Meta'ye gönderme |
-| **Meta Lead Ads** | Facebook Sayfa ID, Page Access Token, Verify Token, Varsayılan Kampanya | Business Suite > Sayfa > Erişim Tokenı | Meta Lead Ads formlarından gelen leadleri gerçek zamanlı CRM'e çekme |
+| **Meta Lead Ads** | Facebook Sayfa ID, Reklam Hesabı ID (opsiyonel), Page Access Token, Verify Token, Varsayılan Kampanya | Business Suite > Sayfa > Erişim Tokenı | Meta Lead Ads formlarından gelen leadleri gerçek zamanlı CRM'e çekme |
 | **Facebook Messenger** | Sayfa ID, Page Access Token, Verify Token | Business Suite > Messenger > Webhook | Messenger DM'den telefon numarası varsa lead oluşturma |
 | **Instagram DM** | Hesap ID, Access Token, Verify Token | Business Suite > Instagram > Webhook | Instagram DM'den telefon numarası varsa lead oluşturma |
 | **WhatsApp Cloud API** | Phone Number ID, WABA ID, Access Token, Verify Token | Meta Business Suite > WhatsApp > Kurulum | WhatsApp mesajından lead oluşturma |
@@ -167,20 +194,21 @@ Yönetici panelinde **Entegrasyon & Kampanya > Entegrasyonlar** ekranından yeni
 ### Önemli Notlar
 
 - `Page Access Token` ve `Access Token` alanları panelde `••••••••` olarak maskelenir. Düzenleme sırasında alanı boş bırakırsanız eski değer korunur.
-- `INTEGRATION_SECRET` veya `JWT_SECRET` tanımlıysa tüm entegrasyon config alanları AES-256-GCM ile veritabanında şifrelenir.
-- `META_AD_ACCOUNT_ID` değeri `act_` ön ekini içermelidir.
+- `INTEGRATION_SECRET` veya `JWT_SECRET` tanımlıysa tüm entegrasyon config alanları AES-256-GCM ile veritabanında şifrelenir. Sunucu bu alanları okurken mutlaka şifreyi çözer; eski sürümlerdeki "şifreli değeri token sanma" hatası giderilmiştir.
+- `META_AD_ACCOUNT_ID` değeri `act_` ön ekiyle veya öneksiz girilebilir; CRM her iki biçimi de normalize eder.
+- Eski Graph API sürümü (v20.0) 24 Eylül 2026'da kapandığı için `META_GRAPH_API_VERSION=v26.0` olmalıdır.
 
 ---
 
 ## Adım 8: Entegrasyon Türleri ve Paneldeki Akış
 
 1. Yönetici olarak giriş yapın.
-2. **Entegrasyon & Kampanya > Entegrasyonlar** sayfasına gidin.
-3. `+ Yeni Entegrasyon` düğmesine basın.
-4. Türü seçin (ör. `Meta Conversions API`), gerekli alanları doldurun ve kaydedin.
-5. `Test Et` düğmesiyle yapılandırmanın doğrulanmasını sağlayın.
-6. **Meta Reklamlar** sekmesine girin.
-7. `Kampanyaları Çek` ve `Leadleri Çek` düğmeleriyle Meta'dan verileri CRM'e aktarın.
+2. **Entegrasyon & Kampanya > Meta Reklamlar** sekmesine gidin.
+3. `Meta ile Bağlan` veya `Token ile Otomatik Kur` düğmesini kullanın. Bu işlem sayfa, reklam hesabı, pixel, sayfa aboneliği ve webhook kaydını otomatik yapar.
+4. `Meta Tanılama` kartında tüm kritik satırların yeşil olduğunu doğrulayın.
+5. `Kampanyaları Çek` ve `Leadleri Çek` düğmeleriyle mevcut verileri hemen içeri alın.
+6. Webhook ve arka plan senkronizasyonu bundan sonra yeni lead'leri otomatik getirir.
+7. İsterseniz **Entegrasyonlar** sekmesinden manuel kayıt da oluşturabilirsiniz; ancak otomatik kurulum önerilir.
 
 Senkronizasyon sonrası:
 - Kampanyalar **Kampanyalar** sekmesinde görünür.
@@ -193,12 +221,13 @@ Senkronizasyon sonrası:
 
 Meta'dan gelen webhook istekleri şu şekilde işlenir:
 
-1. Meta Lead Ads formu doldurulduğunda Meta, `https://saatci.asb.web.tr/api/webhooks/meta/leadads` adresine POST gönderir.
-2. CRM, imzayı `META_APP_SECRET` ile doğrular.
+1. Meta Lead Ads formu doldurulduğunda Meta, webhook callback adresine (`/api/webhooks/meta`) POST gönderir.
+2. CRM, imzayı `META_APP_SECRET` ile doğrular ve Meta'ya hızlıca 200 döner.
 3. `leadgen_id` ile Graph API üzerinden form verilerini çeker (ad, telefon, e-posta, reklam/kampanya bilgisi).
 4. Telefon numarası varsa lead `Kaynak: Meta Lead Ads` olarak CRM'de oluşturulur.
-5. Aynı lead `externalId` ile tekrar gelirse güncellenir, duplicate lead oluşturulmaz.
+5. Aynı `leadgen_id` tekrar gelirse duplicate lead oluşturulmaz; mevcut kayıt kullanılır.
 6. Messenger, Instagram DM ve WhatsApp mesajlarında metinden telefon numarası çıkarılarak lead oluşturulur; yoksa olay yalnızca **Gelen Olaylar** sekmesine kaydedilir.
+7. Webhook hiç gelmezse veya Graph çağrısı başarısız olursa arka plan senkronizasyonu form lead'lerini yeniden çeker.
 
 ---
 
@@ -263,15 +292,29 @@ Payload yapısı (kısım):
    - Meta uygulama ayarlarından webhook aboneliğini test edin.
    - Gerçek bir Meta Lead Ads formu doldurun ve CRM'de lead'in düştüğünü onaylayın.
 
+4. **Panel tanılaması:**
+   - **Meta Reklamlar > Meta Tanılama** kartında token, sayfa aboneliği, webhook ve CAPI satırlarını kontrol edin.
+   - **Olaylar > Gelen Olaylar** ekranında `META_LEAD_ADS` kayıtlarının `PROCESSED` olduğundan emin olun. `FAILED` ise hata mesajı doğrudan Graph API cevabını gösterir.
+
 ---
 
 ## Adım 12: Canlıya Alma, Onay ve Sınırlamalar
 
+### Portainer / canlı ortam kontrolü
+
+1. Portainer stack ortam değişkenlerine `META_APP_ID`, `META_APP_SECRET`, `META_VERIFY_TOKEN`, `META_GRAPH_API_VERSION=v26.0` ekleyin.
+2. İsteğe bağlı: `META_PAGE_ID`, `META_AD_ACCOUNT_ID`, `META_SYNC_INTERVAL_MINUTES=5`, `META_OAUTH_REDIRECT_URI`.
+3. `META_VERIFY_TOKEN` için tahmin edilemeyen uzun bir değer kullanın; varsayılan `saatci_verify_token_change_me` değerini bırakmayın.
+4. Stack'i yeniden deploy edin ve `docker compose ps` ile backend'in sağlıklı olduğunu doğrulayın.
+5. Panelde **Meta ile Bağlan** veya **Token ile Otomatik Kur** çalıştırın; ardından **Meta Tanılama** kartında tüm kritik satırların yeşil olduğunu kontrol edin.
+
 1. Uygulama geliştirme modundaysa sadece sizin ve geliştiricileriniz lead alabilir.
 2. Üretimde tüm Meta izinleri ve webhook'ları çalıştırmak için **App Review** ve **Business Verification** onayı gerekebilir.
-3. Erişim tokenları süresi dolabilir; token yenilendiğinde CRM entegrasyonunda güncelleme yapmalısınız.
-4. Günde en az bir kez, mümkünse gerçek zamanlı olarak olay gönderimi yapılması önerilir.
-5. Toplu gönderimde bir batch'te en fazla 1.000 olaya izin verilir.
+3. Erişim tokenları süresi dolabilir; paneldeki tanılama token bitiş tarihini gösterir. Token yenilendiğinde otomatik kurulumu tekrar çalıştırın.
+4. Graph API v20.0 **24 Eylül 2026'da kapandı**. Güncel sürüm v26.0'dır; `META_GRAPH_API_VERSION` ile yönetilir.
+5. Meta lead verilerini yalnızca **90 gün** saklar. Bu nedenle webhook + arka plan senkronizasyonu birlikte kullanılmalıdır.
+6. Günde en az bir kez, mümkünse gerçek zamanlı olarak olay gönderimi yapılması önerilir.
+7. Toplu gönderimde bir batch'te en fazla 1.000 olaya izin verilir.
 
 ---
 
@@ -281,7 +324,13 @@ Payload yapısı (kısım):
 C: Hayır. Pixel ID, olayın hangi piksele ait olduğunu belirtir. Access Token ise sunucudan Meta API'ye bağlanma iznidir.
 
 **S: Birden fazla reklam hesabı olabilir mi?**
-C: CRM'de tek bir `META_AD_ACCOUNT_ID` saklanır. Farklı hesaplar için env değişkenini değiştirip yeniden başlatmalısınız.
+C: Her Meta Lead Ads entegrasyonu kendi `adAccountId` alanını taşıyabilir. Otomatik kurulum ilk hesabı seçer; farklı hesap için panelden ayrı entegrasyon ekleyin.
+
+**S: Meta'da yeni lead oluşuyor ama CRM'e düşmüyor, nereden bakmalıyım?**
+C: Sırasıyla şunları kontrol edin: (1) `META_GRAPH_API_VERSION` v26.0 mı, (2) **Meta Tanılama** kartında sayfa aboneliği ve webhook yeşil mi, (3) **Gelen Olaylar** ekranında `META_LEAD_ADS` kaydı var mı, (4) varsa hata mesajı ne diyor, (5) uygulama Development modundaysa test kullanıcısı mısınız? Webhook hiç yoksa arka plan senkronizasyonu yine de lead'i çeker; bu durumda **Leadleri Çek** düğmesiyle anında test edebilirsiniz.
+
+**S: Otomatik entegrasyon gerçekten her şeyi yapıyor mu?**
+C: Evet. `Meta ile Bağlan` veya `Token ile Otomatik Kur`; sayfa/reklam hesabı/pixel keşfi, sayfa `subscribed_apps` aboneliği, uygulama webhook kaydı ve CRM entegrasyon kayıtlarını oluşturur. Yalnızca Meta uygulamasında **Facebook Login for Business** ürünü ve geçerli redirect URI tanımlı olmalıdır.
 
 **S: MCP sunucu gerekli mi?**
 C: Hayır. CRM zaten Graph API webhook ve senkronizasyon endpointlerine sahiptir. MCP yalnızca bir AI asistanının Meta API üzerinden işlem yapmasını sağlar.

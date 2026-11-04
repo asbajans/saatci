@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { Badge, Button, Card, Empty, Field, Input, LoadingText, Modal, PageHeader, Select, Table } from '../../components/ui';
@@ -47,6 +47,8 @@ const CONFIG_FIELDS: Record<string, ConfigField[]> = {
   ],
   META_LEAD_ADS: [
     { key: 'pageId', label: 'Facebook Sayfa ID' },
+    { key: 'pageName', label: 'Facebook Sayfa Adı' },
+    { key: 'adAccountId', label: 'Reklam Hesabı ID', placeholder: 'act_1234567890' },
     { key: 'pageAccessToken', label: 'Page Access Token', secret: true },
     { key: 'verifyToken', label: 'Webhook Doğrulama Anahtarı', secret: true },
     { key: 'campaignId', label: 'Varsayılan Kampanya', type: 'campaign' },
@@ -141,6 +143,11 @@ export const IntegrationsPage: React.FC = () => {
   const [campaignModal, setCampaignModal] = useState<any>({ ...emptyCampaign });
   const [metaSyncLoading, setMetaSyncLoading] = useState(false);
   const [metaAdAccountId, setMetaAdAccountId] = useState('');
+  const [metaPageId, setMetaPageId] = useState('');
+  const [metaAccessToken, setMetaAccessToken] = useState('');
+  const [metaAutoLoading, setMetaAutoLoading] = useState(false);
+  const [metaSetupResult, setMetaSetupResult] = useState<any>(null);
+  const [metaNotice, setMetaNotice] = useState<{ tone: 'green' | 'red'; text: string } | null>(null);
 
   const leadsQuery = useQuery({
     queryKey: ['meta-leads'],
@@ -177,6 +184,11 @@ export const IntegrationsPage: React.FC = () => {
     queryFn: async () => (await api.get('/integrations/inbound-events?limit=150')).data.data as any[],
   });
 
+  const diagnosticsQuery = useQuery({
+    queryKey: ['meta-diagnostics'],
+    queryFn: async () => (await api.get('/integrations/meta/diagnostics')).data.data as any,
+  });
+
   const campaigns = campaignsQuery.data || [];
   const leads = leadsQuery.data || [];
   const metaCampaigns = campaigns.filter((c: any) => c.channel === 'Meta' || c.platform === 'Meta' || !!c.externalId);
@@ -193,10 +205,32 @@ export const IntegrationsPage: React.FC = () => {
       'conversion-events',
       'inbound-events',
       'meta-leads',
+      'meta-diagnostics',
     ]) {
       queryClient.invalidateQueries({ queryKey: [key] });
     }
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const meta = params.get('meta');
+    if (!meta) return;
+    const message = params.get('message') || '';
+    setMetaNotice({
+      tone: meta === 'connected' ? 'green' : 'red',
+      text:
+        message ||
+        (meta === 'connected'
+          ? 'Meta bağlantısı kuruldu. Tanılama sonuçlarını kontrol edin.'
+          : 'Meta bağlantısı kurulamadı.'),
+    });
+    setActiveTab('meta');
+    params.delete('meta');
+    params.delete('message');
+    const nextUrl = `${window.location.pathname}${params.size ? `?${params.toString()}` : ''}`;
+    window.history.replaceState({}, '', nextUrl);
+    queryClient.invalidateQueries();
+  }, [queryClient]);
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview', label: 'Özet' },
@@ -254,6 +288,7 @@ export const IntegrationsPage: React.FC = () => {
     try {
       const body: any = {};
       if (metaAdAccountId.trim()) body.adAccountId = metaAdAccountId.trim();
+      if (metaPageId.trim()) body.pageId = metaPageId.trim();
       await api.post(endpoint, body);
       invalidateAll();
       alert('Meta senkronizasyonu tamamlandı');
@@ -261,6 +296,41 @@ export const IntegrationsPage: React.FC = () => {
       alert(apiError(err));
     } finally {
       setMetaSyncLoading(false);
+    }
+  };
+
+  const startMetaOAuth = async () => {
+    try {
+      const res = await api.get('/integrations/meta/oauth/url');
+      window.location.href = res.data.data.url;
+    } catch (err) {
+      alert(apiError(err));
+    }
+  };
+
+  const runMetaAutoSetup = async () => {
+    setMetaAutoLoading(true);
+    try {
+      const body: any = {};
+      if (metaAccessToken.trim()) body.accessToken = metaAccessToken.trim();
+      if (metaPageId.trim()) body.pageId = metaPageId.trim();
+      if (metaAdAccountId.trim()) body.adAccountId = metaAdAccountId.trim();
+      const res = await api.post('/integrations/meta/auto-setup', body);
+      const result = res.data.data;
+      setMetaSetupResult(result);
+      setMetaAccessToken('');
+      setMetaNotice({
+        tone: result?.ok ? 'green' : 'red',
+        text: result?.ok
+          ? 'Otomatik Meta kurulumu tamamlandı.'
+          : `Kurulum tamamlandı ancak ${result?.warnings?.length || 0} uyarı var. Adımları kontrol edin.`,
+      });
+      invalidateAll();
+      diagnosticsQuery.refetch();
+    } catch (err) {
+      alert(apiError(err));
+    } finally {
+      setMetaAutoLoading(false);
     }
   };
 
@@ -564,15 +634,141 @@ export const IntegrationsPage: React.FC = () => {
       {activeTab === 'meta' && (
         <div className="space-y-6">
           <PageHeader title="Meta Reklamlar & Lead'ler" subtitle="Meta iş ortağı kampanyalarını ve form/Mesaj lead'lerini CRM'ye çekin" />
+
+          {metaNotice && (
+            <div
+              className={`rounded-lg border px-4 py-3 text-sm ${
+                metaNotice.tone === 'green'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                  : 'border-red-200 bg-red-50 text-red-700'
+              }`}
+            >
+              {metaNotice.text}
+            </div>
+          )}
+
+          <Card className="p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h3 className="font-semibold text-slate-900">Otomatik Meta Bağlantısı</h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  Meta hesabınızla giriş yapın; sayfa, reklam hesabı, pixel ve webhook aboneliği otomatik kurulur.
+                </p>
+                {diagnosticsQuery.data?.redirectUri && (
+                  <p className="text-xs text-slate-400 mt-1">
+                    OAuth Redirect URI: {diagnosticsQuery.data.redirectUri}
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={startMetaOAuth}>Meta ile Bağlan</Button>
+                <Button variant="secondary" onClick={runMetaAutoSetup} disabled={metaAutoLoading}>
+                  {metaAutoLoading ? 'Kuruluyor...' : 'Token ile Otomatik Kur'}
+                </Button>
+                <Button variant="secondary" onClick={() => diagnosticsQuery.refetch()}>
+                  Tanılamayı Yenile
+                </Button>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Field label="Facebook Sayfa ID (opsiyonel)">
+                <Input value={metaPageId} onChange={(e) => setMetaPageId(e.target.value)} placeholder="1234567890" />
+              </Field>
+              <Field label="Erişim Tokenı (Page / User / System User)">
+                <Input
+                  type="password"
+                  value={metaAccessToken}
+                  onChange={(e) => setMetaAccessToken(e.target.value)}
+                  placeholder="Boşsa kayıtlı token kullanılır"
+                />
+              </Field>
+              <Field label="Reklam Hesabı ID (opsiyonel)">
+                <Input
+                  value={metaAdAccountId}
+                  onChange={(e) => setMetaAdAccountId(e.target.value)}
+                  placeholder="act_1234567890"
+                />
+              </Field>
+            </div>
+            {metaSetupResult && (
+              <div className="mt-4 rounded-lg border border-slate-200 p-4">
+                <p className="text-sm font-semibold text-slate-800">Kurulum sonucu</p>
+                <div className="mt-2 space-y-1">
+                  {(metaSetupResult.steps || []).map((step: any) => (
+                    <p key={step.key} className={`text-xs ${step.ok ? 'text-emerald-700' : 'text-red-600'}`}>
+                      {step.ok ? '✓' : '✕'} {step.label}
+                      {step.detail ? ` — ${step.detail}` : ''}
+                    </p>
+                  ))}
+                </div>
+                {(metaSetupResult.warnings || []).length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {(metaSetupResult.warnings || []).map((warning: string, index: number) => (
+                      <p key={index} className="text-xs text-amber-700">
+                        ! {warning}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
+
+          <Card>
+            <div className="px-6 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold text-slate-900">Meta Tanılama</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Token, sayfa aboneliği, webhook ve Conversions API durumunu kontrol eder.
+                </p>
+              </div>
+              {diagnosticsQuery.data && (
+                <Badge tone={diagnosticsQuery.data.ok ? 'green' : 'red'}>
+                  {diagnosticsQuery.data.ok
+                    ? 'Sağlıklı'
+                    : `${diagnosticsQuery.data.errorCount} hata · ${diagnosticsQuery.data.warningCount} uyarı`}
+                </Badge>
+              )}
+            </div>
+            <div className="p-6 space-y-2">
+              {diagnosticsQuery.isLoading && <LoadingText />}
+              {!diagnosticsQuery.isLoading &&
+                (diagnosticsQuery.data?.checks || []).map((check: any) => (
+                  <div key={check.key} className="flex items-start gap-3 rounded-lg border border-slate-200 p-3">
+                    <span
+                      className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${
+                        check.ok ? 'bg-emerald-500' : check.level === 'error' ? 'bg-red-500' : 'bg-amber-500'
+                      }`}
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-slate-800">{check.label}</p>
+                      {check.detail && <p className="text-xs text-slate-500 mt-0.5">{check.detail}</p>}
+                    </div>
+                  </div>
+                ))}
+              {diagnosticsQuery.data?.lastLead && (
+                <p className="text-xs text-slate-500 pt-2">
+                  Son Meta lead: {diagnosticsQuery.data.lastLead.name} · {dateTime(diagnosticsQuery.data.lastLead.createdAt)}
+                </p>
+              )}
+            </div>
+          </Card>
+
           <Card className="p-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h3 className="font-semibold text-slate-900">Meta Senkronizasyonu</h3>
                 <p className="text-sm text-slate-500 mt-1">
-                  META_LEAD_ADS entegrasyonunda Sayfa Erişim Tokenı tanımlı olmalı. Reklam hesabı ID ('act_...') environment değişkende veya aşağıdan girilebilir.
+                  Webhook kaçırılan lead'ler için arka plan senkronizasyonu çalışır. Sayfa ve reklam hesabı boş
+                  bırakılırsa token üzerinden otomatik bulunur.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
+                <Input
+                  value={metaPageId}
+                  onChange={(e) => setMetaPageId(e.target.value)}
+                  placeholder="Sayfa ID"
+                />
                 <Input
                   value={metaAdAccountId}
                   onChange={(e) => setMetaAdAccountId(e.target.value)}
