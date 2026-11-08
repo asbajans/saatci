@@ -1,10 +1,11 @@
-import { Router, Request, Response } from 'express';
+﻿import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { recordAudit } from '../lib/audit';
 
 const router = Router();
 
@@ -26,6 +27,15 @@ function signToken(user: { id: string; email: string; role: string }) {
   }
   const expiresIn = (process.env.JWT_EXPIRE || '7d') as import('jsonwebtoken').SignOptions['expiresIn'];
   return jwt.sign({ id: user.id, email: user.email, role: user.role }, secret, { expiresIn });
+}
+
+function requestMeta(req: Request) {
+  return {
+    ip: req.ip || req.headers['x-forwarded-for']?.toString() || null,
+    userAgent: req.headers['user-agent'] || null,
+    path: req.path,
+    method: req.method,
+  };
 }
 
 router.get(
@@ -50,6 +60,18 @@ router.post(
       data: { name: data.name.trim(), email, password, role: 'ADMIN' },
       select: { id: true, name: true, email: true, role: true },
     });
+    await recordAudit({
+      ...requestMeta(req),
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      role: user.role,
+      action: 'SETUP',
+      entity: 'auth',
+      entityId: user.id,
+      statusCode: 201,
+      description: 'İlk yönetici hesabı oluşturuldu',
+    });
     const token = signToken(user);
     res.status(201).json({ success: true, data: { user, token } });
   })
@@ -59,15 +81,48 @@ router.post(
   '/login',
   asyncHandler(async (req: Request, res: Response) => {
     const data = loginSchema.parse(req.body);
-    const user = await prisma.user.findUnique({ where: { email: data.email.trim().toLowerCase() } });
+    const email = data.email.trim().toLowerCase();
+    const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
+      await recordAudit({
+        ...requestMeta(req),
+        userEmail: email,
+        action: 'LOGIN_FAILED',
+        entity: 'auth',
+        statusCode: 401,
+        description: 'Başarısız giriş denemesi (kullanıcı bulunamadı)',
+      });
       return res.status(401).json({ success: false, message: 'E-posta veya şifre hatalı' });
     }
     const valid = await bcrypt.compare(data.password, user.password);
     if (!valid) {
+      await recordAudit({
+        ...requestMeta(req),
+        userId: user.id,
+        userName: user.name,
+        userEmail: user.email,
+        role: user.role,
+        action: 'LOGIN_FAILED',
+        entity: 'auth',
+        entityId: user.id,
+        statusCode: 401,
+        description: 'Başarısız giriş denemesi (hatalı şifre)',
+      });
       return res.status(401).json({ success: false, message: 'E-posta veya şifre hatalı' });
     }
     const token = signToken(user);
+    await recordAudit({
+      ...requestMeta(req),
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      role: user.role,
+      action: 'LOGIN',
+      entity: 'auth',
+      entityId: user.id,
+      statusCode: 200,
+      description: 'Kullanıcı giriş yaptı',
+    });
     res.json({
       success: true,
       data: { user: { id: user.id, name: user.name, email: user.email, role: user.role }, token },

@@ -13,6 +13,7 @@ import { Dentist } from './pages/dentist/Dentist';
 import { Banko } from './pages/banko/Banko';
 import { Admin } from './pages/admin/Admin';
 import { PatientsPage } from './pages/records/PatientsPage';
+import { ClinicalPage } from './pages/clinical/ClinicalPage';
 import { AppointmentsPage } from './pages/records/AppointmentsPage';
 import { LeadsPage } from './pages/records/LeadsPage';
 import { TreatmentPage } from './pages/records/TreatmentPage';
@@ -77,6 +78,12 @@ const App = () => {
                       <Route path={ROUTES.BANKO} element={<Banko />} />
                       <Route path={ROUTES.ADMIN} element={<Admin />} />
                       <Route path={ROUTES.PATIENTS} element={<PatientsPage />} />
+                      <Route
+                        path={ROUTES.CLINICAL}
+                        element={
+                          ['ADMIN', 'DENTIST'].includes(user.role) ? <ClinicalPage /> : <Navigate to="/" replace />
+                        }
+                      />
                       <Route path={ROUTES.APPOINTMENTS} element={<AppointmentsPage />} />
                       <Route path={ROUTES.LEADS} element={<LeadsPage />} />
                       <Route path={ROUTES.TREATMENT} element={<TreatmentPage />} />

@@ -1,7 +1,8 @@
-import { Router, Request, Response } from 'express';
+﻿import { Router, Request, Response } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { authMiddleware, roleGuard, AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { createBackup, deleteBackupFile, readBackupFile } from '../lib/backup';
 import { z } from 'zod';
 
 const router = Router();
@@ -178,7 +179,10 @@ const serviceSchema = z.object({
   category: z.string().min(1),
   name: z.string().min(1),
   description: z.string().optional(),
+  code: z.string().optional(),
   price: z.coerce.string().min(1),
+  vatRate: z.coerce.string().optional(),
+  tariffItemId: z.string().uuid().optional().nullable(),
   isActive: z.boolean().optional(),
 });
 
@@ -224,7 +228,10 @@ router.post('/services', asyncHandler(async (req: AuthRequest, res: Response) =>
       category: data.category,
       name: data.name,
       description: data.description,
+      code: data.code,
       price: parseFloat(data.price),
+      vatRate: data.vatRate ? parseFloat(data.vatRate) : 10,
+      tariffItemId: data.tariffItemId || null,
       isActive: data.isActive ?? true,
     },
   });
@@ -239,7 +246,10 @@ router.patch('/services/:id', asyncHandler(async (req: Request, res: Response) =
       category: data.category,
       name: data.name,
       description: data.description,
+      code: data.code,
       price: data.price ? parseFloat(data.price) : undefined,
+      vatRate: data.vatRate ? parseFloat(data.vatRate) : undefined,
+      tariffItemId: data.tariffItemId,
       isActive: data.isActive,
     },
   });
@@ -358,4 +368,97 @@ router.delete('/commissions/:id', asyncHandler(async (req: Request, res: Respons
   res.json({ success: true, data: { deleted: true } });
 }));
 
+// Audit Logs
+router.get('/audit-logs/meta', asyncHandler(async (_req: Request, res: Response) => {
+  const [actions, entities] = await Promise.all([
+    prisma.auditLog.groupBy({ by: ['action'], _count: { _all: true }, orderBy: { action: 'asc' } }),
+    prisma.auditLog.groupBy({ by: ['entity'], _count: { _all: true }, orderBy: { entity: 'asc' } }),
+  ]);
+  res.json({
+    success: true,
+    data: {
+      actions: actions.map((item) => ({ value: item.action, count: item._count._all })),
+      entities: entities.map((item) => ({ value: item.entity, count: item._count._all })),
+    },
+  });
+}));
+
+router.get('/audit-logs', asyncHandler(async (req: Request, res: Response) => {
+  const page = Math.max(1, Number.parseInt(String(req.query.page || '1'), 10) || 1);
+  const pageSize = Math.min(200, Math.max(1, Number.parseInt(String(req.query.pageSize || '50'), 10) || 50));
+  const where: Record<string, unknown> = {};
+
+  if (req.query.action) where.action = String(req.query.action);
+  if (req.query.entity) where.entity = String(req.query.entity);
+  if (req.query.userId) where.userId = String(req.query.userId);
+  if (req.query.q) {
+    const q = String(req.query.q);
+    where.OR = [
+      { userName: { contains: q, mode: 'insensitive' } },
+      { userEmail: { contains: q, mode: 'insensitive' } },
+      { description: { contains: q, mode: 'insensitive' } },
+      { path: { contains: q, mode: 'insensitive' } },
+    ];
+  }
+  if (req.query.from || req.query.to) {
+    where.createdAt = {};
+    if (req.query.from) (where.createdAt as Record<string, unknown>).gte = new Date(String(req.query.from));
+    if (req.query.to) (where.createdAt as Record<string, unknown>).lte = new Date(String(req.query.to));
+  }
+
+  const [items, total] = await Promise.all([
+    prisma.auditLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.auditLog.count({ where }),
+  ]);
+
+  res.json({ success: true, data: { items, total, page, pageSize } });
+}));
+
+// Backups
+router.get('/backups', asyncHandler(async (_req: Request, res: Response) => {
+  const backups = await prisma.backup.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+    include: { createdBy: { select: { id: true, name: true, email: true } } },
+  });
+  res.json({ success: true, data: backups });
+}));
+
+router.post('/backups', asyncHandler(async (req: AuthRequest, res: Response) => {
+  const backup = await createBackup(req.user?.id);
+  res.status(201).json({ success: true, data: backup });
+}));
+
+router.get('/backups/:id/download', asyncHandler(async (req: Request, res: Response) => {
+  const backup = await prisma.backup.findUnique({ where: { id: req.params.id } });
+  if (!backup || backup.status !== 'COMPLETED') {
+    return res.status(404).json({ success: false, message: 'Yedek bulunamadı' });
+  }
+  try {
+    const content = await readBackupFile(backup.fileName);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${backup.fileName}"`);
+    return res.send(content);
+  } catch {
+    return res.status(404).json({ success: false, message: 'Yedek dosyası diskte bulunamadı' });
+  }
+}));
+
+router.delete('/backups/:id', asyncHandler(async (req: Request, res: Response) => {
+  const backup = await prisma.backup.findUnique({ where: { id: req.params.id } });
+  if (!backup) {
+    return res.status(404).json({ success: false, message: 'Yedek bulunamadı' });
+  }
+  await deleteBackupFile(backup.fileName);
+  await prisma.backup.delete({ where: { id: backup.id } });
+  res.json({ success: true, data: { deleted: true } });
+}));
+
 export default router;
+
+

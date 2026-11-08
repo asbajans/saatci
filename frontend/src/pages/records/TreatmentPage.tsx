@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+﻿import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useAppStore } from '../../store/appStore';
@@ -13,9 +13,27 @@ import {
   statusTone,
 } from '../../lib/format';
 
-type ItemForm = { toothNo: string; serviceId: string; treatment: string; price: string; quantity: number };
+type ItemForm = {
+  toothNo: string;
+  serviceId: string;
+  tariffItemId: string;
+  code: string;
+  treatment: string;
+  price: string;
+  quantity: number;
+  vatRate: string;
+};
 
-const newItem = (): ItemForm => ({ toothNo: '', serviceId: '', treatment: '', price: '', quantity: 1 });
+const newItem = (): ItemForm => ({
+  toothNo: '',
+  serviceId: '',
+  tariffItemId: '',
+  code: '',
+  treatment: '',
+  price: '',
+  quantity: 1,
+  vatRate: '',
+});
 
 export const TreatmentPage: React.FC = () => {
   const { user } = useAppStore();
@@ -24,6 +42,7 @@ export const TreatmentPage: React.FC = () => {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [patientId, setPatientId] = useState('');
   const [doctorId, setDoctorId] = useState('');
+  const [tariffId, setTariffId] = useState('');
   const [items, setItems] = useState<ItemForm[]>([newItem()]);
   const [discount, setDiscount] = useState('');
   const [paymentNote, setPaymentNote] = useState('');
@@ -37,8 +56,8 @@ export const TreatmentPage: React.FC = () => {
   });
 
   const { data: services = [] } = useQuery({
-    queryKey: ['services'],
-    queryFn: async () => (await api.get('/settings/services')).data.data as any[],
+    queryKey: ['catalog-services'],
+    queryFn: async () => (await api.get('/catalog/services')).data.data as any[],
   });
 
   const serviceOptions = [
@@ -46,12 +65,15 @@ export const TreatmentPage: React.FC = () => {
     ...(services || []).map((s: any) => ({ value: s.id, label: `${s.category} - ${s.name} (${String(s.price)})` })),
   ];
 
-  const { data: allUsers = [] } = useQuery({
-    queryKey: ['users'],
-    queryFn: async () => (await api.get('/users')).data.data as any[],
+  const { data: doctors = [] } = useQuery({
+    queryKey: ['catalog-dentists'],
+    queryFn: async () => (await api.get('/catalog/dentists')).data.data as any[],
   });
 
-  const doctors = (allUsers || []).filter((u: any) => u.role === 'DENTIST');
+  const { data: tariffs = [] } = useQuery({
+    queryKey: ['catalog-tariffs'],
+    queryFn: async () => (await api.get('/catalog/tariffs')).data.data as any[],
+  });
 
   const { data: detail } = useQuery({
     queryKey: ['treatment-plan', detailId],
@@ -76,15 +98,19 @@ export const TreatmentPage: React.FC = () => {
       await api.post('/treatment', {
         patientId,
         doctorId: doctorId || undefined,
+        tariffId: tariffId || undefined,
         totalPrice: String(total),
         discount: String(Number(discount) || 0),
         paymentPlan: paymentNote ? { note: paymentNote } : undefined,
         items: items.map((item, index) => ({
           toothNo: item.toothNo || undefined,
           serviceId: item.serviceId || undefined,
+          tariffItemId: item.tariffItemId || undefined,
+          code: item.code || undefined,
           treatment: item.treatment,
           price: item.price,
           quantity: item.quantity,
+          vatRate: item.vatRate !== '' ? Number(item.vatRate) : undefined,
           stepOrder: index + 1,
         })),
       });
@@ -94,6 +120,7 @@ export const TreatmentPage: React.FC = () => {
       setCreateOpen(false);
       setPatientId('');
       setDoctorId('');
+      setTariffId('');
       setItems([newItem()]);
       setDiscount('');
       setPaymentNote('');
@@ -205,7 +232,7 @@ export const TreatmentPage: React.FC = () => {
           </>
         }
       >
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <Field label="Hasta *" hint="Ad, telefon veya TC ile arayın. Kayıtlı değilse aynı ekrandan yeni hasta oluşturabilirsiniz.">
             <PatientPicker value={patientId} onChange={setPatientId} />
           </Field>
@@ -214,7 +241,17 @@ export const TreatmentPage: React.FC = () => {
               <option value="">Doktor seçin</option>
               {doctors.map((d: any) => (
                 <option key={d.id} value={d.id}>
-                  {d.name} ({d.role})
+                  {d.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Tarife" hint="TDB tarifesinden aktarılan hizmetler bu tarifeye bağlanır.">
+            <Select value={tariffId} onChange={(e) => setTariffId(e.target.value)}>
+              <option value="">Tarife seçin</option>
+              {tariffs.map((t: any) => (
+                <option key={t.id} value={t.id}>
+                  {t.year} · {t.name}
                 </option>
               ))}
             </Select>
@@ -236,7 +273,7 @@ export const TreatmentPage: React.FC = () => {
                   }}
                 />
               </div>
-              <div className="col-span-3">
+              <div className="col-span-4">
                 <SearchSelect
                   value={item.serviceId}
                   onChange={(serviceId) => {
@@ -245,6 +282,9 @@ export const TreatmentPage: React.FC = () => {
                     next[index] = {
                       ...item,
                       serviceId,
+                      tariffItemId: service?.tariffItemId || '',
+                      code: service?.code || '',
+                      vatRate: service?.vatRate !== undefined ? String(service.vatRate) : item.vatRate,
                       treatment: service ? `${service.category} - ${service.name}` : item.treatment,
                       price: service ? String(service.price) : item.price,
                     };
@@ -266,7 +306,7 @@ export const TreatmentPage: React.FC = () => {
                   }}
                 />
               </div>
-              <div className="col-span-2">
+              <div className="col-span-1">
                 <Input
                   type="number"
                   min={1}
@@ -275,6 +315,20 @@ export const TreatmentPage: React.FC = () => {
                   onChange={(e) => {
                     const next = [...items];
                     next[index] = { ...item, quantity: Math.max(1, Number(e.target.value) || 1) };
+                    setItems(next);
+                  }}
+                />
+              </div>
+              <div className="col-span-2">
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  placeholder="KDV %"
+                  value={item.vatRate}
+                  onChange={(e) => {
+                    const next = [...items];
+                    next[index] = { ...item, vatRate: e.target.value };
                     setItems(next);
                   }}
                 />
@@ -368,3 +422,6 @@ export const TreatmentPage: React.FC = () => {
     </div>
   );
 };
+
+
+

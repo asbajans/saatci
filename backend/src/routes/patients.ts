@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+﻿import { Router, Request, Response } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { authMiddleware, roleGuard, AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
@@ -13,10 +13,31 @@ const patientSchema = z.object({
   surname: z.string().min(2),
   tc: z.string().min(1),
   phone: z.string().min(5),
+  mobilePhone: z.string().optional(),
+  wiredPhone: z.string().optional(),
   email: z.string().email().optional().or(z.literal('')),
   birthDate: z.string().optional(),
   gender: z.string().optional(),
+  nationality: z.string().optional(),
+  country: z.string().optional(),
+  city: z.string().optional(),
+  town: z.string().optional(),
+  postCode: z.string().optional(),
   address: z.string().optional(),
+  profession: z.string().optional(),
+  bloodGroup: z.string().optional(),
+  controlPeriodMonth: z.coerce.number().int().min(0).max(120).optional().nullable(),
+  specialCode: z.string().optional(),
+  relativeName: z.string().optional(),
+  relativePhone: z.string().optional(),
+  referenceName: z.string().optional(),
+  referencePatientId: z.string().uuid().optional().nullable(),
+  organization: z.string().optional(),
+  foreignPatientType: z.string().optional(),
+  balance: z.coerce.string().optional(),
+  notes: z.string().optional(),
+  tariffId: z.string().uuid().optional().nullable(),
+  dentistId: z.string().uuid().optional().nullable(),
 });
 
 const medicalSchema = z.object({
@@ -96,10 +117,13 @@ router.get(
           orderBy: { createdAt: 'desc' },
         },
         medicalRecord: role === 'DENTIST' || role === 'ADMIN',
+        tariff: true,
+        dentist: { select: { id: true, name: true, email: true } },
+        referencePatient: { select: { id: true, hastaNo: true, name: true, surname: true } },
       },
     });
     if (!patient) {
-      return res.status(404).json({ success: false, message: 'Hasta bulunamadı' });
+      return res.status(404).json({ success: false, message: 'Hasta bulunamadÄ±' });
     }
     res.json({ success: true, data: patient });
   })
@@ -118,10 +142,31 @@ router.post(
         surname: data.surname,
         tc: data.tc,
         phone: data.phone,
+        mobilePhone: data.mobilePhone || null,
+        wiredPhone: data.wiredPhone || null,
         email: data.email || null,
         birthDate: data.birthDate ? new Date(data.birthDate) : null,
         gender: data.gender || null,
+        nationality: data.nationality || 'TR',
+        country: data.country || 'TR',
+        city: data.city || null,
+        town: data.town || null,
+        postCode: data.postCode || null,
         address: data.address || null,
+        profession: data.profession || null,
+        bloodGroup: data.bloodGroup || null,
+        controlPeriodMonth: data.controlPeriodMonth ?? null,
+        specialCode: data.specialCode || null,
+        relativeName: data.relativeName || null,
+        relativePhone: data.relativePhone || null,
+        referenceName: data.referenceName || null,
+        referencePatientId: data.referencePatientId || null,
+        organization: data.organization || null,
+        foreignPatientType: data.foreignPatientType || null,
+        balance: data.balance ? parseFloat(data.balance) : 0,
+        notes: data.notes || null,
+        tariffId: data.tariffId || null,
+        dentistId: data.dentistId || null,
       },
     });
     res.status(201).json({ success: true, data: patient });
@@ -136,9 +181,36 @@ router.put(
     const patient = await prisma.patient.update({
       where: { id: req.params.id },
       data: {
-        ...data,
-        email: data.email || undefined,
+        hastaNo: data.hastaNo,
+        name: data.name,
+        surname: data.surname,
+        tc: data.tc,
+        phone: data.phone,
+        mobilePhone: data.mobilePhone,
+        wiredPhone: data.wiredPhone,
+        email: data.email === '' ? null : data.email,
         birthDate: data.birthDate ? new Date(data.birthDate) : undefined,
+        gender: data.gender,
+        nationality: data.nationality,
+        country: data.country,
+        city: data.city,
+        town: data.town,
+        postCode: data.postCode,
+        address: data.address,
+        profession: data.profession,
+        bloodGroup: data.bloodGroup,
+        controlPeriodMonth: data.controlPeriodMonth,
+        specialCode: data.specialCode,
+        relativeName: data.relativeName,
+        relativePhone: data.relativePhone,
+        referenceName: data.referenceName,
+        referencePatientId: data.referencePatientId,
+        organization: data.organization,
+        foreignPatientType: data.foreignPatientType,
+        balance: data.balance !== undefined ? parseFloat(data.balance) : undefined,
+        notes: data.notes,
+        tariffId: data.tariffId,
+        dentistId: data.dentistId,
       },
     });
     res.json({ success: true, data: patient });
@@ -173,3 +245,4 @@ router.put(
 );
 
 export default router;
+

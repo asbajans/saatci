@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+﻿import { Router, Request, Response } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { authMiddleware, roleGuard, AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
@@ -9,18 +9,29 @@ const router = Router();
 
 const planItemSchema = z.object({
   toothNo: z.string().optional(),
-  serviceId: z.string().optional(),
+  serviceId: z.string().uuid().optional(),
+  tariffItemId: z.string().uuid().optional(),
+  code: z.string().optional(),
   treatment: z.string().min(1),
   price: z.string(),
   quantity: z.number().min(1).default(1),
+  vatRate: z.coerce.number().min(0).max(100).optional(),
+  discount: z.coerce.number().min(0).optional(),
+  total: z.coerce.number().min(0).optional(),
   stepOrder: z.number().min(1).default(1),
 });
 
 const treatmentPlanSchema = z.object({
   patientId: z.string().uuid(),
   doctorId: z.string().optional(),
+  tariffId: z.string().uuid().optional().nullable(),
   totalPrice: z.string(),
   discount: z.string().optional(),
+  subtotal: z.string().optional(),
+  vatAmount: z.string().optional(),
+  grandTotal: z.string().optional(),
+  currency: z.string().optional(),
+  notes: z.string().optional(),
   paymentPlan: z.record(z.any()).optional(),
   channel: z.string().optional(),
   campaignId: z.string().uuid().optional().nullable(),
@@ -91,14 +102,14 @@ router.get(
       include: { ...includeRelations, doctor: { select: { id: true, name: true, role: true } } },
     });
     if (!plan) {
-      return res.status(404).json({ success: false, message: 'Tedavi planı bulunamadı' });
+      return res.status(404).json({ success: false, message: 'Tedavi planÄ± bulunamadÄ±' });
     }
     // Doctors can only access plans assigned to them (or created by them)
     if (req.user!.role === 'DENTIST') {
       const isAssigned = plan.doctorId && plan.doctorId === req.user!.id;
       const isCreator = plan.createdById === req.user!.id;
       if (!isAssigned && !isCreator) {
-        return res.status(403).json({ success: false, message: 'Bu tedavi planına erişim izniniz yok' });
+        return res.status(403).json({ success: false, message: 'Bu tedavi planÄ±na eriÅŸim izniniz yok' });
       }
     }
     res.json({ success: true, data: plan });
@@ -118,18 +129,33 @@ router.post(
         doctorId: data.doctorId || null,
         totalPrice: parseFloat(data.totalPrice),
         discount: data.discount ? parseFloat(data.discount) : 0,
+        subtotal: data.subtotal ? parseFloat(data.subtotal) : undefined,
+        vatAmount: data.vatAmount ? parseFloat(data.vatAmount) : 0,
+        grandTotal: data.grandTotal ? parseFloat(data.grandTotal) : undefined,
+        currency: data.currency || 'TRY',
+        notes: data.notes,
+        tariffId: data.tariffId || null,
         paymentPlan: data.paymentPlan ?? undefined,
         channel: resolved.channel,
         campaignId: resolved.campaignId,
         items: {
-          create: data.items.map((item) => ({
-            toothNo: item.toothNo,
-            serviceId: item.serviceId || undefined,
-            treatment: item.treatment,
-            price: parseFloat(item.price),
-            quantity: item.quantity,
-            stepOrder: item.stepOrder,
-          })),
+          create: data.items.map((item) => {
+            const price = parseFloat(item.price);
+            const discount = item.discount ?? 0;
+            return {
+              toothNo: item.toothNo,
+              serviceId: item.serviceId || undefined,
+              tariffItemId: item.tariffItemId || undefined,
+              code: item.code,
+              treatment: item.treatment,
+              price,
+              quantity: item.quantity,
+              vatRate: item.vatRate ?? 0,
+              discount,
+              total: item.total ?? Math.max(0, price * item.quantity - discount),
+              stepOrder: item.stepOrder,
+            };
+          }),
         },
       },
       include: { ...includeRelations, doctor: { select: { id: true, name: true, role: true } } },
@@ -151,7 +177,7 @@ router.patch(
       patientId: plan.patientId,
       status: 'TREATMENT_APPROVED',
       changedById: req.user!.id,
-      note: 'Tedavi planı onaylandı',
+      note: 'Tedavi planÄ± onaylandÄ±',
       planId: plan.id,
       value: Math.max(0, Number(plan.totalPrice) - Number(plan.discount)),
     });
@@ -177,7 +203,7 @@ router.patch(
         patientId: plan.patientId,
         status: 'TREATMENT_APPROVED',
         changedById: req.user!.id,
-        note: 'Tedavi planı onaylandı',
+        note: 'Tedavi planÄ± onaylandÄ±',
         planId: plan.id,
         value: Math.max(0, Number(plan.totalPrice) - Number(plan.discount)),
       });
@@ -187,3 +213,4 @@ router.patch(
 );
 
 export default router;
+

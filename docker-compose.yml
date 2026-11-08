@@ -1,4 +1,4 @@
-services:
+﻿services:
   db:
     image: postgres:15-alpine
     container_name: saatci-db
@@ -69,6 +69,9 @@ services:
       INITIAL_ADMIN_NAME: "${INITIAL_ADMIN_NAME:-}"
       INITIAL_ADMIN_EMAIL: "${INITIAL_ADMIN_EMAIL:-}"
       INITIAL_ADMIN_PASSWORD: "${INITIAL_ADMIN_PASSWORD:-}"
+      BACKUP_DIR: "${BACKUP_DIR:-/app/backups}"
+    volumes:
+      - saatci_backups:/app/backups
     depends_on:
       db:
         condition: service_healthy
@@ -107,3 +110,5 @@ networks:
 
 volumes:
   saatci_db_data:
+  saatci_backups:
+

@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+﻿import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useAppStore } from '../../store/appStore';
@@ -42,6 +42,11 @@ const emptyForm = {
   campaignId: '',
   dateTime: toLocalInput(new Date(Date.now() + 3600000)),
   endTime: '',
+  unitNo: '',
+  duration: '',
+  title: '',
+  phone: '',
+  procedureType: '',
   notes: '',
 };
 
@@ -327,7 +332,7 @@ export const AppointmentsPage: React.FC = () => {
             target: 'patient',
             patientId: '',
             leadId: '',
-            type: d.role === 'DENTIST' ? 'DENTIST' : 'MEETING',
+            type: d.role === 'DENTIST' ? 'EXAMINATION' : 'MEETING',
             userId: d.columnId,
             dateTime: `${date}T${startTime}`,
             endTime,
@@ -361,6 +366,11 @@ export const AppointmentsPage: React.FC = () => {
         campaignId: form.campaignId || undefined,
         appointmentDate: fromLocalInput(form.dateTime),
         endDate: form.endTime ? fromLocalInput(`${datePart}T${form.endTime}`) : undefined,
+        unitNo: form.unitNo ? Number(form.unitNo) : undefined,
+        duration: form.duration ? Number(form.duration) : undefined,
+        title: form.title || undefined,
+        phone: form.phone || undefined,
+        procedureType: form.procedureType || undefined,
         notes: form.notes || undefined,
       });
     },
@@ -991,6 +1001,38 @@ export const AppointmentsPage: React.FC = () => {
           </Field>
         </div>
 
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Field label="Birim No">
+            <Input
+              type="number"
+              min={0}
+              value={form.unitNo}
+              onChange={(e) => setForm({ ...form, unitNo: e.target.value })}
+            />
+          </Field>
+          <Field label="Süre (dk)" hint="Bitiş saati boşsa kullanılır.">
+            <Input
+              type="number"
+              min={0}
+              value={form.duration}
+              onChange={(e) => setForm({ ...form, duration: e.target.value })}
+            />
+          </Field>
+          <Field label="İşlem Türü">
+            <Input
+              value={form.procedureType}
+              onChange={(e) => setForm({ ...form, procedureType: e.target.value })}
+              placeholder="örn. İmplant"
+            />
+          </Field>
+          <Field label="Başlık" className="md:col-span-2">
+            <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          </Field>
+          <Field label="Randevu Telefonu">
+            <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          </Field>
+        </div>
+
         <Field label="Not">
           <Textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
         </Field>
@@ -1082,3 +1124,4 @@ export const AppointmentsPage: React.FC = () => {
     </div>
   );
 };
+

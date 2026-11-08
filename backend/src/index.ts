@@ -21,6 +21,10 @@ import settingsRoutes from './routes/settings';
 import scheduleRoutes from './routes/schedule';
 import integrationRoutes from './routes/integrations';
 import formRoutes, { publicFormsRouter } from './routes/forms';
+import tariffRoutes from './routes/tariffs';
+import catalogRoutes from './routes/catalog';
+import clinicalRoutes from './routes/clinical';
+import { auditMiddleware } from './middleware/audit';
 import { startMetaLeadSyncJob } from './lib/metaSyncJob';
 
 dotenv.config();
@@ -70,6 +74,8 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'saatci-backend' });
 });
 
+app.use(auditMiddleware);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/patients', patientRoutes);
@@ -87,6 +93,9 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/schedule', scheduleRoutes);
 app.use('/api/integrations', integrationRoutes);
 app.use('/api/forms', formRoutes);
+app.use('/api/tariffs', tariffRoutes);
+app.use('/api/catalog', catalogRoutes);
+app.use('/api/clinical', clinicalRoutes);
 app.use('/api/public/forms', publicFormsRouter);
 
 app.use(errorHandler);

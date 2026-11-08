@@ -21,10 +21,32 @@ export type Patient = {
   surname: string;
   tc: string;
   phone: string;
+  mobilePhone?: string | null;
+  wiredPhone?: string | null;
   email?: string | null;
   birthDate?: string | null;
   gender?: string | null;
   address?: string | null;
+  city?: string | null;
+  town?: string | null;
+  postCode?: string | null;
+  nationality?: string | null;
+  profession?: string | null;
+  bloodGroup?: string | null;
+  controlPeriodMonth?: number | null;
+  specialCode?: string | null;
+  relativeName?: string | null;
+  relativePhone?: string | null;
+  referenceName?: string | null;
+  referencePatientId?: string | null;
+  organization?: string | null;
+  foreignPatientType?: string | null;
+  balance?: number | null;
+  notes?: string | null;
+  tariffId?: string | null;
+  tariff?: { id: string; name: string; year?: number | null } | null;
+  dentistId?: string | null;
+  dentist?: { id: string; name: string } | null;
   createdAt: string;
 };
 
@@ -54,6 +76,12 @@ export type Appointment = {
   campaign?: Campaign | null;
   appointmentDate: string;
   createdAt: string;
+  endDate?: string | null;
+  unitNo?: number | null;
+  duration?: number | null;
+  title?: string | null;
+  phone?: string | null;
+  procedureType?: string | null;
   notes?: string | null;
   visit?: { id: string; protokolNo: string; status: VisitStatus; visitDate?: string } | null;
 };
@@ -120,6 +148,11 @@ export type TreatmentItem = {
   price: number;
   quantity: number;
   stepOrder: number;
+  tariffItemId?: string | null;
+  code?: string | null;
+  vatRate?: number | null;
+  discount?: number | null;
+  total?: number | null;
 };
 
 export type TreatmentPlan = {
@@ -131,6 +164,12 @@ export type TreatmentPlan = {
   status: TreatmentPlanStatus;
   totalPrice: number;
   discount: number;
+  subtotal?: number | null;
+  vatAmount?: number | null;
+  grandTotal?: number | null;
+  currency?: string | null;
+  notes?: string | null;
+  tariffId?: string | null;
   paymentPlan?: any;
   channel?: string | null;
   campaignId?: string | null;
@@ -140,12 +179,63 @@ export type TreatmentPlan = {
   createdAt: string;
 };
 
+export type InvoiceItem = {
+  id: string;
+  invoiceId: string;
+  serviceId?: string | null;
+  tariffItemId?: string | null;
+  code?: string | null;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  vatRate: number;
+  vatAmount: number;
+  discount: number;
+  total: number;
+  currency: string;
+};
+
 export type Invoice = {
   id: string;
   planId: string;
+  invoiceNo?: string | null;
+  invoiceDate?: string | null;
+  invoiceType?: string | null;
   amount: number;
   paidAmount: number;
+  subtotal?: number | null;
+  vatAmount?: number | null;
+  discount?: number | null;
+  grandTotal?: number | null;
+  currency?: string | null;
+  exchangeRate?: number | null;
+  description?: string | null;
   status: InvoiceStatus;
   dueDate?: string | null;
   paidAt?: string | null;
+  items?: InvoiceItem[];
+};
+
+export type Tariff = {
+  id: string;
+  name: string;
+  year?: number | null;
+  type: 'TDB' | 'CUSTOM';
+  sourceKey?: string | null;
+  effectiveDate?: string | null;
+  isActive: boolean;
+  items?: TariffItem[];
+};
+
+export type TariffItem = {
+  id: string;
+  tariffId: string;
+  code: string;
+  name: string;
+  categoryNo?: number | null;
+  categoryName?: string | null;
+  priceExclVat: number;
+  priceInclVat: number;
+  vatRate: number;
+  isActive: boolean;
 };

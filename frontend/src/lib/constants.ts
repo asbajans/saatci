@@ -16,6 +16,7 @@ export const ROUTES = {
   BANKO: '/banko',
   ADMIN: '/admin',
   PATIENTS: '/patients',
+  CLINICAL: '/clinical',
   APPOINTMENTS: '/appointments',
   LEADS: '/leads',
   TREATMENT: '/treatment',

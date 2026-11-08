@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+﻿import { Router, Request, Response } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { authMiddleware, roleGuard, AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
@@ -23,10 +23,15 @@ const appointmentSchema = z
     campaignId: z.string().uuid().optional().nullable(),
     appointmentDate: z.string().datetime(),
     endDate: z.string().datetime().optional().nullable(),
+    unitNo: z.coerce.number().int().min(1).optional().nullable(),
+    duration: z.coerce.number().int().min(1).optional().nullable(),
+    title: z.string().optional(),
+    phone: z.string().optional(),
+    procedureType: z.string().optional(),
     notes: z.string().optional(),
   })
   .refine((data) => !!data.patientId || !!data.leadId, {
-    message: 'Hasta veya lead seçilmelidir',
+    message: 'Hasta veya lead seÃ§ilmelidir',
   });
 
 const appointmentUpdateSchema = z.object({
@@ -39,6 +44,11 @@ const appointmentUpdateSchema = z.object({
   campaignId: z.string().uuid().nullable().optional(),
   appointmentDate: z.string().datetime().optional(),
   endDate: z.string().datetime().optional().nullable(),
+  unitNo: z.coerce.number().int().min(1).optional().nullable(),
+  duration: z.coerce.number().int().min(1).optional().nullable(),
+  title: z.string().optional(),
+  phone: z.string().optional(),
+  procedureType: z.string().optional(),
   notes: z.string().optional(),
 });
 
@@ -82,12 +92,12 @@ async function resolveChannel(params: {
 async function validateStaff(type: string, userId?: string | null) {
   if (!userId) return null;
   const staff = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
-  if (!staff) return 'Personel bulunamadı';
+  if (!staff) return 'Personel bulunamadÄ±';
   const required = type === 'MEETING' ? 'SALES' : 'DENTIST';
   if (staff.role !== required) {
     return type === 'MEETING'
-      ? 'Görüşme randevuları satış personeli tarafından yapılmalıdır'
-      : 'Muayene ve tedavi randevuları doktor tarafından yapılmalıdır';
+      ? 'GÃ¶rÃ¼ÅŸme randevularÄ± satÄ±ÅŸ personeli tarafÄ±ndan yapÄ±lmalÄ±dÄ±r'
+      : 'Muayene ve tedavi randevularÄ± doktor tarafÄ±ndan yapÄ±lmalÄ±dÄ±r';
   }
   return null;
 }
@@ -150,7 +160,7 @@ router.get(
       include: includeRelations,
     });
     if (!appointment) {
-      return res.status(404).json({ success: false, message: 'Randevu bulunamadı' });
+      return res.status(404).json({ success: false, message: 'Randevu bulunamadÄ±' });
     }
     res.json({ success: true, data: appointment });
   })
@@ -188,6 +198,11 @@ router.post(
         campaignId: resolved.campaignId,
         appointmentDate: new Date(data.appointmentDate),
         endDate: data.endDate ? new Date(data.endDate) : null,
+        unitNo: data.unitNo ?? null,
+        duration: data.duration ?? null,
+        title: data.title || null,
+        phone: data.phone || null,
+        procedureType: data.procedureType || null,
         notes: data.notes,
       },
       include: includeRelations,
@@ -211,7 +226,7 @@ router.post(
         status: 'APPOINTMENT_BOOKED',
         changedById: req.user!.id,
         appointmentId: appointment.id,
-        note: 'Randevu oluşturuldu',
+        note: 'Randevu oluÅŸturuldu',
       });
     }
 
@@ -228,7 +243,7 @@ router.patch(
     if (data.userId !== undefined || data.type !== undefined) {
       const current = await prisma.appointment.findUnique({ where: { id: req.params.id } });
       if (!current) {
-        return res.status(404).json({ success: false, message: 'Randevu bulunamadı' });
+        return res.status(404).json({ success: false, message: 'Randevu bulunamadÄ±' });
       }
       const effectiveType = data.type ?? current.type;
       const effectiveUser = data.userId !== undefined ? data.userId : current.userId;
@@ -268,3 +283,4 @@ router.patch(
 );
 
 export default router;
+

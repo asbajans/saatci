@@ -3,8 +3,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Table } from '../../components/ui';
 import { ROLE_LABEL, dateTime, fromLocalInput, money, toLocalInput } from '../../lib/format';
+import { TariffsTab } from './TariffsTab';
+import { BackupsTab } from './BackupsTab';
+import { AuditLogsTab } from './AuditLogsTab';
 
-type Tab = 'services' | 'commissions' | 'calendar' | 'payments';
+type Tab = 'services' | 'commissions' | 'calendar' | 'payments' | 'tariffs' | 'backups' | 'audit';
 
 export const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('services');
@@ -50,6 +53,30 @@ export const SettingsPage: React.FC = () => {
           >
             Tahsilat Türleri
           </button>
+          <button
+            onClick={() => setActiveTab('tariffs')}
+            className={`py-4 px-1 border-b-2 font-medium text-sm transition ${
+              activeTab === 'tariffs' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            TDB Tarifeleri
+          </button>
+          <button
+            onClick={() => setActiveTab('backups')}
+            className={`py-4 px-1 border-b-2 font-medium text-sm transition ${
+              activeTab === 'backups' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            Yedekler
+          </button>
+          <button
+            onClick={() => setActiveTab('audit')}
+            className={`py-4 px-1 border-b-2 font-medium text-sm transition ${
+              activeTab === 'audit' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            İşlem Kayıtları
+          </button>
         </nav>
       </div>
 
@@ -60,6 +87,12 @@ export const SettingsPage: React.FC = () => {
           <CommissionsTab />
         ) : activeTab === 'payments' ? (
           <PaymentMethodsTab />
+        ) : activeTab === 'tariffs' ? (
+          <TariffsTab />
+        ) : activeTab === 'backups' ? (
+          <BackupsTab />
+        ) : activeTab === 'audit' ? (
+          <AuditLogsTab />
         ) : (
           <CalendarTab />
         )}

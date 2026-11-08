@@ -55,6 +55,33 @@ enum InvoiceStatus {
   OVERDUE
 }
 
+enum TariffType {
+  TDB
+  CUSTOM
+}
+
+enum DiagnosisStatus {
+  ACTIVE
+  RESOLVED
+}
+
+enum TreatmentRecordStatus {
+  PLANNED
+  APPLIED
+  CANCELLED
+}
+
+enum ClinicalNoteType {
+  NOTE
+  ANAMNESIS
+  FOLLOW_UP
+}
+
+enum BackupStatus {
+  COMPLETED
+  FAILED
+}
+
 enum VisitStatus {
   WAITING
   IN_PROGRESS
@@ -115,6 +142,40 @@ model User {
     handoversTo         CashHandover[]  @relation("CashHandoverTo")
     approvedHandovers   CashHandover[]  @relation("CashHandoverApprover")
     leadStatusChanges   LeadStatusHistory[] @relation("LeadStatusChanger")
+    dentistProfile      DentistProfile?
+    primaryPatients     Patient[]         @relation("PatientPrimaryDentist")
+    diagnoses           Diagnosis[]       @relation("DiagnosisDoctor")
+    treatmentRecords    TreatmentRecord[] @relation("TreatmentDoctor")
+    prescriptions       Prescription[]    @relation("PrescriptionDoctor")
+    clinicalNotes       ClinicalNote[]    @relation("ClinicalNoteAuthor")
+    toothFindings       ToothFinding[]    @relation("ToothFindingUpdater")
+    auditLogs           AuditLog[]
+    backups             Backup[]
+}
+
+model DentistProfile {
+  id                     String   @id @default(uuid()) @db.Uuid
+  userId                 String   @unique @db.Uuid
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nationalId             String?
+  birthDate              DateTime?
+  officeHours            Json?
+  preventOutsideOfficeHours Boolean @default(true)
+  lunchBreakStart        String?
+  lunchBreakEnd          String?
+  mobilePhone            String?
+  wiredPhone             String?
+  phone                  String?
+  country                String?
+  city                   String?
+  town                   String?
+  address                String?
+  postCode               String?
+  isActive               Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([isActive])
 }
 
 model Patient {
@@ -128,6 +189,30 @@ model Patient {
   birthDate     DateTime?
   gender        String?
   address       String?
+  mobilePhone   String?
+  wiredPhone    String?
+  nationality   String?     @default("TR")
+  country       String?     @default("TR")
+  city          String?
+  town          String?
+  postCode      String?
+  profession    String?
+  bloodGroup    String?
+  controlPeriodMonth Int?
+  specialCode   String?
+  relativeName  String?
+  relativePhone String?
+  referenceName String?
+  referencePatientId String? @db.Uuid
+  referencePatient Patient? @relation("PatientReference", fields: [referencePatientId], references: [id], onDelete: SetNull)
+  organization  String?
+  foreignPatientType String?
+  balance       Decimal     @default(0)
+  notes         String?
+  tariffId      String?     @db.Uuid
+  tariff        Tariff?     @relation(fields: [tariffId], references: [id], onDelete: SetNull)
+  dentistId     String?     @db.Uuid
+  dentist       User?       @relation("PatientPrimaryDentist", fields: [dentistId], references: [id], onDelete: SetNull)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
@@ -139,6 +224,16 @@ model Patient {
   doctorCommissions Commission[] @relation("DoctorCommissionPatient")
   salesCommissions  Commission[] @relation("SalesCommissionPatient")
   collections    Collection[]
+  referrals      Patient[]   @relation("PatientReference")
+  diagnoses      Diagnosis[]
+  treatmentRecords TreatmentRecord[]
+  prescriptions  Prescription[]
+  clinicalNotes  ClinicalNote[]
+  toothFindings  ToothFinding[]
+
+  @@index([tariffId])
+  @@index([dentistId])
+  @@index([referencePatientId])
 }
 
 model MedicalRecord {
@@ -171,9 +266,17 @@ model Appointment {
   campaign       Campaign?         @relation(fields: [campaignId], references: [id])
   appointmentDate DateTime
   endDate        DateTime?
+  unitNo         Int?
+  duration       Int?
+  title          String?
+  phone          String?
+  procedureType  String?
   createdAt      DateTime          @default(now())
   notes          String?
   visit          PatientVisit?
+  treatmentRecords TreatmentRecord[]
+  diagnoses      Diagnosis[]
+  clinicalNotes  ClinicalNote[]
 
   @@index([patientId])
   @@index([leadId])
@@ -181,6 +284,7 @@ model Appointment {
   @@index([type])
   @@index([channel])
   @@index([createdById])
+  @@index([appointmentDate])
 }
 
 enum SlotStatus {
@@ -441,15 +545,22 @@ model Service {
     category    String   // implant, treatment, surgery, product, etc.
     name        String
     description String?
+    code        String?
     price       Decimal
+    vatRate     Decimal  @default(10)
+    tariffItemId String? @unique @db.Uuid
+    tariffItem  TariffItem? @relation(fields: [tariffItemId], references: [id], onDelete: SetNull)
     isActive     Boolean  @default(true)
     createdAt    DateTime @default(now())
     updatedAt    DateTime @updatedAt
 
     items        TreatmentItem[]
+    treatmentRecords TreatmentRecord[]
+    invoiceItems InvoiceItem[]
 
     @@unique([category, name])
     @@index([category])
+    @@index([code])
 }
 
 model TreatmentPlan {
@@ -463,12 +574,20 @@ model TreatmentPlan {
     status        TreatmentPlanStatus @default(DRAFT)
     totalPrice    Decimal
     discount      Decimal            @default(0)
+    subtotal      Decimal?
+    vatAmount     Decimal            @default(0)
+    grandTotal    Decimal?
+    currency      String             @default("TRY")
     paymentPlan   Json?
+    notes         String?
     channel       String?
     campaignId    String?
     campaign      Campaign?          @relation(fields: [campaignId], references: [id])
+    tariffId      String?            @db.Uuid
+    tariff        Tariff?            @relation(fields: [tariffId], references: [id], onDelete: SetNull)
     items         TreatmentItem[]
     invoices      Invoice[]
+    treatmentRecords TreatmentRecord[]
     approvedAt    DateTime?
     createdAt     DateTime          @default(now())
     updatedAt     DateTime          @updatedAt
@@ -476,6 +595,7 @@ model TreatmentPlan {
     @@index([createdById])
     @@index([doctorId])
     @@index([channel])
+    @@index([tariffId])
 }
 
 model TreatmentItem {
@@ -484,26 +604,75 @@ model TreatmentItem {
     plan        TreatmentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
     toothNo     String?
     serviceId   String?   @db.Uuid
-    service      Service?  @relation(fields: [serviceId], references: [id])
+    service     Service?  @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+    tariffItemId String?  @db.Uuid
+    tariffItem  TariffItem? @relation(fields: [tariffItemId], references: [id], onDelete: SetNull)
+    code        String?
     treatment   String
     price       Decimal
     quantity    Int      @default(1)
+    vatRate     Decimal  @default(0)
+    discount    Decimal  @default(0)
+    total       Decimal?
     stepOrder   Int      @default(1)
+    treatmentRecords TreatmentRecord[]
+
+    @@index([tariffItemId])
+    @@index([serviceId])
 }
 
 model Invoice {
   id          String   @id @default(uuid())
   planId      String
   plan        TreatmentPlan @relation(fields: [planId], references: [id])
+  invoiceNo   String?  @unique
+  invoiceDate DateTime?
+  invoiceType String   @default("OUTGOING")
   amount      Decimal
+  subtotal    Decimal?
+  vatAmount   Decimal  @default(0)
+  discount    Decimal  @default(0)
+  grandTotal  Decimal?
+  currency    String   @default("TRY")
+  exchangeRate Decimal @default(1)
+  description String?
+  senderTaxpayerId String?
   paidAmount  Decimal  @default(0)
   status      InvoiceStatus @default(UNPAID)
   dueDate     DateTime?
   paidAt      DateTime?
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
 
+  items            InvoiceItem[]
   bankoCommissions Commission[]
   collections      Collection[]
+
+  @@index([invoiceDate])
+  @@index([status])
+}
+
+model InvoiceItem {
+  id           String   @id @default(uuid()) @db.Uuid
+  invoiceId    String   @db.Uuid
+  invoice      Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  serviceId    String?  @db.Uuid
+  service      Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  tariffItemId String?  @db.Uuid
+  tariffItem   TariffItem? @relation(fields: [tariffItemId], references: [id], onDelete: SetNull)
+  code         String?
+  description  String
+  quantity     Decimal  @default(1)
+  unitPrice    Decimal
+  vatRate      Decimal  @default(10)
+  vatAmount    Decimal  @default(0)
+  discount     Decimal  @default(0)
+  total        Decimal
+  currency     String   @default("TRY")
+  createdAt    DateTime @default(now())
+
+  @@index([invoiceId])
+  @@index([tariffItemId])
 }
 
 model PaymentMethod {
@@ -677,4 +846,205 @@ model Commission {
   @@index([type])
   @@index([status])
   @@index([periodStart, periodEnd])
+}
+
+model Tariff {
+  id            String      @id @default(uuid()) @db.Uuid
+  name          String
+  year          Int
+  type          TariffType  @default(TDB)
+  effectiveDate DateTime?
+  pdfUrl        String?
+  sourceKey     String?     @unique
+  sourceUrl     String?
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  items         TariffItem[]
+  patients      Patient[]
+  plans         TreatmentPlan[]
+
+  @@unique([year, type, name])
+  @@index([year])
+  @@index([type])
+  @@index([isActive])
+}
+
+model TariffItem {
+  id            String   @id @default(uuid()) @db.Uuid
+  tariffId      String   @db.Uuid
+  tariff        Tariff   @relation(fields: [tariffId], references: [id], onDelete: Cascade)
+  code          String
+  categoryCode  String?
+  category      String
+  name          String
+  description   String?
+  priceExclVat  Decimal
+  priceInclVat  Decimal
+  vatRate       Decimal  @default(10)
+  notes         String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  services          Service[]
+  treatmentItems    TreatmentItem[]
+  treatmentRecords  TreatmentRecord[]
+  invoiceItems      InvoiceItem[]
+
+  @@unique([tariffId, code])
+  @@index([tariffId, category])
+  @@index([tariffId, name])
+  @@index([isActive])
+}
+
+model Diagnosis {
+  id            String          @id @default(uuid()) @db.Uuid
+  patientId     String          @db.Uuid
+  patient       Patient         @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  appointmentId String?         @db.Uuid
+  appointment   Appointment?    @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  doctorId      String?         @db.Uuid
+  doctor        User?           @relation("DiagnosisDoctor", fields: [doctorId], references: [id], onDelete: SetNull)
+  toothNo       String?
+  code          String?
+  title         String
+  description   String?
+  status        DiagnosisStatus @default(ACTIVE)
+  diagnosedAt   DateTime        @default(now())
+  resolvedAt    DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([patientId, status])
+  @@index([appointmentId])
+  @@index([doctorId])
+}
+
+model TreatmentRecord {
+  id            String                @id @default(uuid()) @db.Uuid
+  patientId     String                @db.Uuid
+  patient       Patient               @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  planId        String?               @db.Uuid
+  plan          TreatmentPlan?        @relation(fields: [planId], references: [id], onDelete: SetNull)
+  planItemId    String?               @db.Uuid
+  planItem      TreatmentItem?        @relation(fields: [planItemId], references: [id], onDelete: SetNull)
+  appointmentId String?               @db.Uuid
+  appointment   Appointment?          @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  doctorId      String?               @db.Uuid
+  doctor        User?                 @relation("TreatmentDoctor", fields: [doctorId], references: [id], onDelete: SetNull)
+  serviceId     String?               @db.Uuid
+  service       Service?              @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  tariffItemId  String?               @db.Uuid
+  tariffItem    TariffItem?           @relation(fields: [tariffItemId], references: [id], onDelete: SetNull)
+  toothNo       String?
+  code          String?
+  procedureName String
+  quantity      Int                   @default(1)
+  unitPrice     Decimal
+  vatRate       Decimal               @default(0)
+  total         Decimal
+  status        TreatmentRecordStatus @default(APPLIED)
+  appliedAt     DateTime              @default(now())
+  notes         String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@index([patientId, status])
+  @@index([planId])
+  @@index([appointmentId])
+  @@index([doctorId])
+  @@index([tariffItemId])
+  @@index([appliedAt])
+}
+
+model Prescription {
+  id             String   @id @default(uuid()) @db.Uuid
+  patientId      String   @db.Uuid
+  patient        Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId       String?  @db.Uuid
+  doctor         User?    @relation("PrescriptionDoctor", fields: [doctorId], references: [id], onDelete: SetNull)
+  prescriptionNo String?
+  issuedAt       DateTime @default(now())
+  items          Json
+  notes          String?
+  createdAt      DateTime @default(now())
+
+  @@index([patientId, issuedAt])
+  @@index([doctorId])
+}
+
+model ClinicalNote {
+  id            String          @id @default(uuid()) @db.Uuid
+  patientId     String          @db.Uuid
+  patient       Patient         @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  appointmentId String?         @db.Uuid
+  appointment   Appointment?    @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  doctorId      String?         @db.Uuid
+  doctor        User?           @relation("ClinicalNoteAuthor", fields: [doctorId], references: [id], onDelete: SetNull)
+  type          ClinicalNoteType @default(NOTE)
+  content       String
+  createdAt     DateTime        @default(now())
+
+  @@index([patientId, createdAt])
+  @@index([appointmentId])
+}
+
+model ToothFinding {
+  id            String   @id @default(uuid()) @db.Uuid
+  patientId     String   @db.Uuid
+  patient       Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  toothNo       String
+  condition     String
+  surfaces      String?
+  notes         String?
+  updatedById   String?  @db.Uuid
+  updatedBy     User?    @relation("ToothFindingUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([patientId, toothNo])
+  @@index([patientId])
+  @@index([condition])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String?  @db.Uuid
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userName    String?
+  userEmail   String?
+  role        String?
+  action      String
+  entity      String
+  entityId    String?
+  method      String?
+  path        String?
+  statusCode  Int?
+  ip          String?
+  userAgent   String?
+  description String?
+  changes     Json?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entity])
+  @@index([action])
+  @@index([userId])
+}
+
+model Backup {
+  id          String       @id @default(uuid()) @db.Uuid
+  fileName    String
+  sizeBytes   Int
+  status      BackupStatus @default(COMPLETED)
+  error       String?
+  metadata    Json?
+  createdById String?      @db.Uuid
+  createdBy   User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime     @default(now())
+
+  @@index([createdAt])
+  @@index([status])
 }

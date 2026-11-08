@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useAppStore } from '../../store/appStore';
@@ -20,10 +20,23 @@ const emptyForm = {
   surname: '',
   tc: '',
   phone: '',
+  mobilePhone: '',
+  wiredPhone: '',
   email: '',
   birthDate: '',
   gender: '',
   address: '',
+  city: '',
+  town: '',
+  profession: '',
+  bloodGroup: '',
+  controlPeriodMonth: '',
+  relativeName: '',
+  relativePhone: '',
+  referenceName: '',
+  notes: '',
+  tariffId: '',
+  dentistId: '',
 };
 
 const emptyMedical = {
@@ -75,12 +88,40 @@ export const PatientsPage: React.FC = () => {
     }
   }, [detail]);
 
+  const { data: tariffs = [] } = useQuery({
+    queryKey: ['catalog-tariffs'],
+    queryFn: async () => (await api.get('/catalog/tariffs')).data.data as any[],
+  });
+
+  const { data: dentists = [] } = useQuery({
+    queryKey: ['catalog-dentists'],
+    queryFn: async () => (await api.get('/catalog/dentists')).data.data as any[],
+  });
+
   const createMutation = useMutation({
     mutationFn: async () => {
       await api.post('/patients', {
-        ...form,
+        name: form.name,
+        surname: form.surname,
+        tc: form.tc,
+        phone: form.phone,
+        mobilePhone: form.mobilePhone || undefined,
+        wiredPhone: form.wiredPhone || undefined,
         email: form.email || undefined,
         birthDate: form.birthDate ? `${form.birthDate}T00:00:00.000Z` : undefined,
+        gender: form.gender || undefined,
+        address: form.address || undefined,
+        city: form.city || undefined,
+        town: form.town || undefined,
+        profession: form.profession || undefined,
+        bloodGroup: form.bloodGroup || undefined,
+        controlPeriodMonth: form.controlPeriodMonth ? Number(form.controlPeriodMonth) : undefined,
+        relativeName: form.relativeName || undefined,
+        relativePhone: form.relativePhone || undefined,
+        referenceName: form.referenceName || undefined,
+        notes: form.notes || undefined,
+        tariffId: form.tariffId || undefined,
+        dentistId: form.dentistId || undefined,
       });
     },
     onSuccess: () => {
@@ -154,6 +195,7 @@ export const PatientsPage: React.FC = () => {
         open={addOpen}
         onClose={() => setAddOpen(false)}
         title="Yeni Hasta Kaydı"
+        wide
         footer={
           <>
             <Button variant="secondary" onClick={() => setAddOpen(false)}>
@@ -191,8 +233,66 @@ export const PatientsPage: React.FC = () => {
               <option value="Erkek">Erkek</option>
             </Select>
           </Field>
-          <Field label="Adres">
+          <Field label="Adres" className="md:col-span-2">
             <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+          </Field>
+          <Field label="Cep Telefonu">
+            <Input value={form.mobilePhone} onChange={(e) => setForm({ ...form, mobilePhone: e.target.value })} />
+          </Field>
+          <Field label="Sabit Telefon">
+            <Input value={form.wiredPhone} onChange={(e) => setForm({ ...form, wiredPhone: e.target.value })} />
+          </Field>
+          <Field label="İl">
+            <Input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
+          </Field>
+          <Field label="İlçe">
+            <Input value={form.town} onChange={(e) => setForm({ ...form, town: e.target.value })} />
+          </Field>
+          <Field label="Meslek">
+            <Input value={form.profession} onChange={(e) => setForm({ ...form, profession: e.target.value })} />
+          </Field>
+          <Field label="Kan Grubu">
+            <Input value={form.bloodGroup} onChange={(e) => setForm({ ...form, bloodGroup: e.target.value })} placeholder="örn. A Rh+" />
+          </Field>
+          <Field label="Kontrol Periyodu (ay)">
+            <Input
+              type="number"
+              min={0}
+              value={form.controlPeriodMonth}
+              onChange={(e) => setForm({ ...form, controlPeriodMonth: e.target.value })}
+            />
+          </Field>
+          <Field label="Tarife">
+            <Select value={form.tariffId} onChange={(e) => setForm({ ...form, tariffId: e.target.value })}>
+              <option value="">Tarife seçin</option>
+              {tariffs.map((tariff: any) => (
+                <option key={tariff.id} value={tariff.id}>
+                  {tariff.year} · {tariff.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Takip Doktoru">
+            <Select value={form.dentistId} onChange={(e) => setForm({ ...form, dentistId: e.target.value })}>
+              <option value="">Doktor seçin</option>
+              {dentists.map((dentist: any) => (
+                <option key={dentist.id} value={dentist.id}>
+                  {dentist.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Yakını">
+            <Input value={form.relativeName} onChange={(e) => setForm({ ...form, relativeName: e.target.value })} />
+          </Field>
+          <Field label="Yakın Telefonu">
+            <Input value={form.relativePhone} onChange={(e) => setForm({ ...form, relativePhone: e.target.value })} />
+          </Field>
+          <Field label="Referans">
+            <Input value={form.referenceName} onChange={(e) => setForm({ ...form, referenceName: e.target.value })} />
+          </Field>
+          <Field label="Hasta Notu" className="md:col-span-2">
+            <Textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
           </Field>
         </div>
         <p className="text-xs text-slate-400">Hasta numarası otomatik oluşturulur.</p>
@@ -236,6 +336,30 @@ export const PatientsPage: React.FC = () => {
               <div>
                 <p className="text-slate-400 text-xs">Kayıt Tarihi</p>
                 <p className="font-medium">{dateOnly(detail.createdAt)}</p>
+              </div>
+              <div>
+                <p className="text-slate-400 text-xs">Cep / Sabit</p>
+                <p className="font-medium">{detail.mobilePhone || '-'} / {detail.wiredPhone || '-'}</p>
+              </div>
+              <div>
+                <p className="text-slate-400 text-xs">Kan Grubu</p>
+                <p className="font-medium">{detail.bloodGroup || '-'}</p>
+              </div>
+              <div>
+                <p className="text-slate-400 text-xs">Tarife</p>
+                <p className="font-medium">{detail.tariff?.name || '-'}</p>
+              </div>
+              <div>
+                <p className="text-slate-400 text-xs">Takip Doktoru</p>
+                <p className="font-medium">{detail.dentist?.name || '-'}</p>
+              </div>
+              <div>
+                <p className="text-slate-400 text-xs">Bakiye</p>
+                <p className="font-medium">{money(detail.balance)}</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-slate-400 text-xs">Hasta Notu</p>
+                <p className="font-medium">{detail.notes || '-'}</p>
               </div>
             </div>
 
@@ -346,3 +470,4 @@ export const PatientsPage: React.FC = () => {
     </div>
   );
 };
+
