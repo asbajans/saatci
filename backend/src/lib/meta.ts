@@ -2,6 +2,14 @@ import { Prisma } from '@prisma/client';
 import { prisma } from './prisma';
 import { recordLeadCreated } from './tracking';
 import { graphGetAll, graphRequest, normalizeAdAccountId } from './graph';
+import {
+  fieldMappingsFromQuestions,
+  parseFieldData,
+  resolveEmail,
+  resolveName,
+  resolvePhone,
+  summarizeFieldKeys,
+} from './leadFields';
 
 export type MetaPage = {
   id: string;
@@ -33,33 +41,6 @@ function metaToken(override?: string | null) {
   );
 }
 
-function parseFieldData(fieldData: any[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const item of fieldData || []) {
-    const name = String(item?.name || '');
-    if (!name) continue;
-    const values = Array.isArray(item?.values) ? item.values : [item?.values];
-    out[name] = values.filter(Boolean).join(', ');
-  }
-  return out;
-}
-
-function leadName(fields: Record<string, string>, lead: any): string {
-  return (
-    fields.full_name ||
-    [fields.first_name, fields.last_name].filter(Boolean).join(' ') ||
-    lead.ad_name ||
-    'Meta Lead'
-  );
-}
-
-function leadPhone(fields: Record<string, string>): string {
-  return fields.phone_number || fields.phone || fields.msisdn || fields.mobile_number || '';
-}
-
-function leadEmail(fields: Record<string, string>): string | null {
-  return fields.email || fields.email_address || null;
-}
 
 export async function getMetaPages(accessToken: string): Promise<MetaPage[]> {
   return graphGetAll<MetaPage>({
@@ -183,11 +164,20 @@ export async function syncMetaLeads(params: {
   const adAccountId = await resolveMetaAdAccountId(accessToken, params.adAccountId).catch(() => '');
   const warnings: string[] = [];
 
-  const forms = await graphGetAll<any>({
-    path: `${pageId}/leadgen_forms`,
-    accessToken,
-    params: { fields: 'id,name,status,leads_count,created_time', limit: 100 },
-  });
+  let forms: any[] = [];
+  try {
+    forms = await graphGetAll<any>({
+      path: `${pageId}/leadgen_forms`,
+      accessToken,
+      params: { fields: 'id,name,status,leads_count,created_time,questions', limit: 100 },
+    });
+  } catch {
+    forms = await graphGetAll<any>({
+      path: `${pageId}/leadgen_forms`,
+      accessToken,
+      params: { fields: 'id,name,status,leads_count,created_time', limit: 100 },
+    });
+  }
 
   let created = 0;
   let updated = 0;
@@ -197,6 +187,7 @@ export async function syncMetaLeads(params: {
   for (const form of forms) {
     const formId = String(form.id || '');
     if (!formId) continue;
+    const mappings = fieldMappingsFromQuestions(form.questions);
     let leads: any[] = [];
     try {
       leads = await graphGetAll<any>({
@@ -221,10 +212,10 @@ export async function syncMetaLeads(params: {
       if (!externalId) continue;
 
       const fields = parseFieldData(lead.field_data);
-      const name = leadName(fields, lead).trim();
-      const phone = leadPhone(fields).trim();
+      const name = (resolveName(fields, mappings) || lead.ad_name || 'Meta Lead').trim();
+      const phone = resolvePhone(fields, mappings.phone).trim();
       if (!phone || phone.length < 5) {
-        warnings.push(`${externalId}: telefon numarası bulunamadı`);
+        warnings.push(`${externalId}: telefon numarası bulunamadı (alanlar: ${summarizeFieldKeys(fields)})`);
         continue;
       }
 
@@ -280,7 +271,7 @@ export async function syncMetaLeads(params: {
       const data: any = {
         name,
         phone,
-        email: leadEmail(fields),
+        email: resolveEmail(fields, mappings.email),
         source: 'Meta Lead Ads',
         campaignId,
         status: 'NEW',
@@ -390,3 +381,5 @@ export async function syncMetaLeads(params: {
     warnings,
   };
 }
+
+

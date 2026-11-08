@@ -5,8 +5,37 @@ import { prisma } from '../lib/prisma';
 import { decryptConfig } from '../lib/secrets';
 import { recordLeadCreated, resolveCampaignId } from '../lib/tracking';
 import { graphRequest } from '../lib/graph';
+import {
+  fieldMappingsFromQuestions,
+  parseFieldData,
+  resolveEmail,
+  resolveName,
+  resolvePhone,
+  summarizeFieldKeys,
+  type LeadFieldMappings,
+} from '../lib/leadFields';
 
 const router = Router();
+
+const formMappingsCache = new Map<string, LeadFieldMappings>();
+
+async function formMappings(formId: string, accessToken: string): Promise<LeadFieldMappings> {
+  if (!formId) return fieldMappingsFromQuestions([]);
+  const cached = formMappingsCache.get(formId);
+  if (cached) return cached;
+  try {
+    const form = await graphRequest<any>({
+      path: encodeURIComponent(formId),
+      accessToken,
+      params: { fields: 'questions' },
+    });
+    const mappings = fieldMappingsFromQuestions(form.questions);
+    formMappingsCache.set(formId, mappings);
+    return mappings;
+  } catch {
+    return fieldMappingsFromQuestions([]);
+  }
+}
 
 async function integrationConfig(type: string) {
   const integration = await prisma.integration.findFirst({
@@ -200,18 +229,12 @@ async function processLeadAds(body: any) {
           },
         });
 
-        const fieldMap: Record<string, string> = {};
-        for (const field of data.field_data || []) {
-          const key = String(field.name || '');
-          const value = Array.isArray(field.values) ? field.values[0] : field.values;
-          if (key && value) fieldMap[key] = String(value);
-        }
-        const fullName =
-          fieldMap.full_name ||
-          [fieldMap.first_name, fieldMap.last_name].filter(Boolean).join(' ') ||
-          'Meta Lead';
-        const phone = fieldMap.phone_number || fieldMap.phone || '';
-        const email = fieldMap.email || fieldMap.email_address || null;
+        const formId = String(data.form_id || value.form_id || '');
+        const mappings = await formMappings(formId, String(accessToken));
+        const fields = parseFieldData(data.field_data);
+        const fullName = resolveName(fields, mappings) || 'Meta Lead';
+        const phone = resolvePhone(fields, mappings.phone);
+        const email = resolveEmail(fields, mappings.email);
 
         let campaignId = configInfo?.config.campaignId || null;
         const metaCampaignId = data.campaign_id || value.campaign_id;
@@ -255,7 +278,7 @@ async function processLeadAds(body: any) {
         });
         await logInbound('META_LEAD_ADS', leadgenId, body, {
           status: result ? 'PROCESSED' : 'FAILED',
-          error: result ? undefined : 'Telefon numarası bulunamadı',
+          error: result ? undefined : `Telefon numarası bulunamadı (alanlar: ${summarizeFieldKeys(parseFieldData(data.field_data))})`,
           leadId: result?.lead.id,
         });
       } catch (error) {
@@ -428,3 +451,4 @@ router.post('/whatsapp', (req: Request, res: Response) => {
 });
 
 export default router;
+
