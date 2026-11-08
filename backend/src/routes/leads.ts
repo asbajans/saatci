@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { authMiddleware, roleGuard, AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
@@ -76,16 +77,102 @@ const includeRelations = {
   visits: { select: { id: true, protokolNo: true, status: true, visitDate: true } },
 } as const;
 
+const leadsQuerySchema = z.object({
+  q: z.string().trim().optional(),
+  status: leadStatusEnum.optional(),
+  source: z.string().trim().optional(),
+  campaignId: z.string().uuid().optional(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.union([z.literal('all'), z.coerce.number().int().min(1).max(500)]).optional(),
+});
+
+function phoneSearchChunks(value: string): string[] {
+  let digits = value.replace(/\D/g, '');
+  if (digits.startsWith('90') && digits.length > 10) digits = digits.slice(2);
+  else if (digits.startsWith('0') && digits.length > 3) digits = digits.slice(1);
+  if (digits.length < 3) return [];
+
+  return [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6, 8), digits.slice(8, 10)].filter(
+    (chunk) => chunk.length > 0
+  );
+}
+
 router.use(authMiddleware);
 
 router.get(
   '/',
-  asyncHandler(async (_req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
+    const params = leadsQuerySchema.parse(req.query);
+    const where: Prisma.LeadWhereInput = {};
+
+    if (params.status) where.status = params.status;
+    if (params.source) where.source = params.source;
+    if (params.campaignId) where.campaignId = params.campaignId;
+
+    const from = params.dateFrom ? new Date(params.dateFrom) : undefined;
+    const to = params.dateTo ? new Date(params.dateTo) : undefined;
+    if ((from && !Number.isNaN(from.getTime())) || (to && !Number.isNaN(to.getTime()))) {
+      where.createdAt = {
+        ...(from && !Number.isNaN(from.getTime()) ? { gte: from } : {}),
+        ...(to && !Number.isNaN(to.getTime()) ? { lte: to } : {}),
+      };
+    }
+
+    if (params.q) {
+      const phoneChunks = phoneSearchChunks(params.q);
+      where.OR = [
+        { name: { contains: params.q, mode: 'insensitive' } },
+        { email: { contains: params.q, mode: 'insensitive' } },
+        phoneChunks.length
+          ? { AND: phoneChunks.map((chunk) => ({ phone: { contains: chunk } })) }
+          : { phone: { contains: params.q } },
+      ];
+    }
+
+    const paginated = params.page !== undefined || params.pageSize !== undefined;
+    if (!paginated) {
+      const leads = await prisma.lead.findMany({
+        where,
+        include: includeRelations,
+        orderBy: { createdAt: 'desc' },
+      });
+      return res.json({ success: true, data: leads });
+    }
+
+    const page = params.page ?? 1;
+    const pageSize = params.pageSize ?? 20;
+    const total = await prisma.lead.count({ where });
     const leads = await prisma.lead.findMany({
+      where,
       include: includeRelations,
       orderBy: { createdAt: 'desc' },
+      ...(pageSize === 'all' ? {} : { skip: (page - 1) * pageSize, take: pageSize }),
     });
-    res.json({ success: true, data: leads });
+
+    res.json({
+      success: true,
+      data: leads,
+      meta: {
+        total,
+        page,
+        pageSize,
+        totalPages: pageSize === 'all' ? 1 : Math.max(1, Math.ceil(total / pageSize)),
+      },
+    });
+  })
+);
+
+router.get(
+  '/sources',
+  asyncHandler(async (_req: Request, res: Response) => {
+    const rows = await prisma.lead.findMany({
+      distinct: ['source'],
+      select: { source: true },
+      orderBy: { source: 'asc' },
+    });
+    res.json({ success: true, data: rows.map((row) => row.source).filter(Boolean) });
   })
 );
 

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useAppStore } from '../../store/appStore';
@@ -26,10 +26,22 @@ const emptyAppointment = {
   notes: '',
 };
 
+type LeadsPageResponse = {
+  data: any[];
+  meta?: { total: number; page: number; pageSize: number | 'all'; totalPages: number };
+};
+
 export const LeadsPage: React.FC = () => {
   const { user } = useAppStore();
   const queryClient = useQueryClient();
-  const [filter, setFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
+  const [campaignFilter, setCampaignFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState('20');
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState({ ...emptyLead });
   const [convertLead, setConvertLead] = useState<any>(null);
@@ -41,9 +53,37 @@ export const LeadsPage: React.FC = () => {
 
   const canManage = ['ADMIN', 'CALL_CENTER', 'SALES'].includes(user?.role || '');
 
-  const { data: leads = [], isLoading } = useQuery({
-    queryKey: ['leads'],
-    queryFn: async () => (await api.get('/leads')).data.data as any[],
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, sourceFilter, campaignFilter, dateFrom, dateTo, pageSize]);
+
+  const { data, isLoading } = useQuery({
+    queryKey: [
+      'leads',
+      { search, statusFilter, sourceFilter, campaignFilter, dateFrom, dateTo, page, pageSize },
+    ],
+    queryFn: async () => {
+      const params: Record<string, string | number> = { page, pageSize };
+      if (search.trim()) params.q = search.trim();
+      if (statusFilter) params.status = statusFilter;
+      if (sourceFilter) params.source = sourceFilter;
+      if (campaignFilter) params.campaignId = campaignFilter;
+      if (dateFrom) params.dateFrom = new Date(`${dateFrom}T00:00:00`).toISOString();
+      if (dateTo) params.dateTo = new Date(`${dateTo}T23:59:59.999`).toISOString();
+      return (await api.get('/leads', { params })).data as LeadsPageResponse;
+    },
+  });
+
+  const leads = data?.data ?? [];
+  const meta = data?.meta;
+
+  useEffect(() => {
+    if (meta && page > meta.totalPages) setPage(meta.totalPages);
+  }, [meta, page]);
+
+  const { data: sources = [] } = useQuery({
+    queryKey: ['lead-sources'],
+    queryFn: async () => (await api.get('/leads/sources')).data.data as string[],
   });
 
   const { data: campaigns = [] } = useQuery({
@@ -61,10 +101,9 @@ export const LeadsPage: React.FC = () => {
     [staff, apptForm.type]
   );
 
-  const filtered = useMemo(() => (filter ? leads.filter((l) => l.status === filter) : leads), [leads, filter]);
-
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['leads'] });
+    queryClient.invalidateQueries({ queryKey: ['lead-sources'] });
     queryClient.invalidateQueries({ queryKey: ['appointments'] });
     queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     queryClient.invalidateQueries({ queryKey: ['lead-reminders'] });
@@ -180,6 +219,19 @@ export const LeadsPage: React.FC = () => {
     onError: (err) => alert(apiError(err)),
   });
 
+  const hasFilters = Boolean(
+    search.trim() || statusFilter || sourceFilter || campaignFilter || dateFrom || dateTo
+  );
+
+  const clearFilters = () => {
+    setSearch('');
+    setStatusFilter('');
+    setSourceFilter('');
+    setCampaignFilter('');
+    setDateFrom('');
+    setDateTo('');
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -189,24 +241,70 @@ export const LeadsPage: React.FC = () => {
       />
 
       <Card className="p-4">
-        <Select value={filter} onChange={(e) => setFilter(e.target.value)} className="max-w-[220px]">
-          <option value="">Tüm Durumlar</option>
-          {Object.entries(LEAD_STATUS_LABEL).map(([key, label]) => (
-            <option key={key} value={key}>
-              {label}
-            </option>
-          ))}
-        </Select>
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Ara" className="min-w-[220px] flex-1">
+            <Input
+              placeholder="Ad veya telefon ile ara..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </Field>
+          <Field label="Durum" className="w-[170px]">
+            <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="">Tüm Durumlar</option>
+              {Object.entries(LEAD_STATUS_LABEL).map(([key, label]) => (
+                <option key={key} value={key}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Kaynak" className="w-[160px]">
+            <Select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
+              <option value="">Tüm Kaynaklar</option>
+              {sources.map((source) => (
+                <option key={source} value={source}>
+                  {source}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Kampanya" className="w-[200px]">
+            <Select value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value)}>
+              <option value="">Tüm Kampanyalar</option>
+              {campaigns.map((campaign: any) => (
+                <option key={campaign.id} value={campaign.id}>
+                  {campaign.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Başlangıç" className="w-[150px]">
+            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          </Field>
+          <Field label="Bitiş" className="w-[150px]">
+            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          </Field>
+          {hasFilters && (
+            <Button variant="secondary" onClick={clearFilters}>
+              Temizle
+            </Button>
+          )}
+        </div>
       </Card>
 
       <Card>
         {isLoading ? (
           <LoadingText />
-        ) : filtered.length === 0 ? (
-          <Empty title="Lead bulunamadı" hint="Yeni lead ekleyerek başlayın." />
+        ) : leads.length === 0 ? (
+          <Empty
+            title="Lead bulunamadı"
+            hint={hasFilters ? 'Filtre veya arama kriterlerini değiştirin.' : 'Yeni lead ekleyerek başlayın.'}
+          />
         ) : (
-          <Table head={['Ad', 'Telefon', 'Kaynak', 'Kampanya', 'Durum', 'Son Randevu', 'Kayıt', 'İşlem']}>
-            {filtered.map((lead: any) => (
+          <>
+            <Table head={['Ad', 'Telefon', 'Kaynak', 'Kampanya', 'Durum', 'Son Randevu', 'Kayıt', 'İşlem']}>
+              {leads.map((lead: any) => (
               <tr key={lead.id} className="hover:bg-slate-50">
                 <td className="px-4 py-3">
                   <p className="font-semibold text-slate-900">{lead.name}</p>
@@ -293,10 +391,42 @@ export const LeadsPage: React.FC = () => {
                   </div>
                 </td>
               </tr>
-            ))}
-          </Table>
+              ))}
+            </Table>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
+              <p className="text-sm text-slate-500">
+                Toplam <strong>{meta?.total ?? leads.length}</strong> lead · Sayfa {meta?.page ?? page} /{' '}
+                {meta?.totalPages ?? 1}
+              </p>
+              <div className="flex items-center gap-2">
+                <Select value={pageSize} onChange={(e) => setPageSize(e.target.value)} className="w-[130px]">
+                  <option value="20">20 / sayfa</option>
+                  <option value="50">50 / sayfa</option>
+                  <option value="100">100 / sayfa</option>
+                  <option value="all">Tümü</option>
+                </Select>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={page <= 1}
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                >
+                  Önceki
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={page >= (meta?.totalPages ?? 1)}
+                  onClick={() => setPage((current) => current + 1)}
+                >
+                  Sonraki
+                </Button>
+              </div>
+            </div>
+          </>
         )}
       </Card>
+
 
       <Modal
         open={addOpen}
