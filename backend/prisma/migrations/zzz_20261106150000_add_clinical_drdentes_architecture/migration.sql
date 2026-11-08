@@ -1,4 +1,4 @@
-﻿-- Dr.DENTES-inspired clinical architecture: tariffs, clinical records, audit and backups
+-- Dr.DENTES-inspired clinical architecture: tariffs, clinical records, audit and backups
 
 -- CreateEnum
 CREATE TYPE "TariffType" AS ENUM ('TDB', 'CUSTOM');
