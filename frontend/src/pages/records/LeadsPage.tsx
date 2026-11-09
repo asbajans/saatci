@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useAppStore } from '../../store/appStore';
-import { Badge, Button, Card, Empty, Field, Input, LoadingText, Modal, PageHeader, Select, Table } from '../../components/ui';
+import { Badge, Button, Card, Empty, Field, Input, LoadingText, Modal, PageHeader, Select, Table, Textarea } from '../../components/ui';
 import {
   APPT_TYPE_LABEL,
   LEAD_STATUS_LABEL,
@@ -50,6 +50,9 @@ export const LeadsPage: React.FC = () => {
   const [apptForm, setApptForm] = useState({ ...emptyAppointment });
   const [callbackLead, setCallbackLead] = useState<any>(null);
   const [callbackForm, setCallbackForm] = useState({ dateTime: '', note: '' });
+  const [cardLeadId, setCardLeadId] = useState<string | null>(null);
+  const [cardDescription, setCardDescription] = useState('');
+  const [noteContent, setNoteContent] = useState('');
 
   const canManage = ['ADMIN', 'CALL_CENTER', 'SALES'].includes(user?.role || '');
 
@@ -90,6 +93,16 @@ export const LeadsPage: React.FC = () => {
     queryKey: ['campaigns'],
     queryFn: async () => (await api.get('/campaigns')).data.data as any[],
   });
+
+  const { data: cardLead, isLoading: cardLoading } = useQuery({
+    queryKey: ['lead', cardLeadId],
+    queryFn: async () => (await api.get(`/leads/${cardLeadId}`)).data.data as any,
+    enabled: !!cardLeadId,
+  });
+
+  useEffect(() => {
+    setCardDescription(cardLead?.description || '');
+  }, [cardLead?.id, cardLead?.description]);
 
   const { data: staff = [] } = useQuery({
     queryKey: ['staff'],
@@ -219,6 +232,40 @@ export const LeadsPage: React.FC = () => {
     onError: (err) => alert(apiError(err)),
   });
 
+  const descriptionMutation = useMutation({
+    mutationFn: async () => {
+      if (!cardLeadId) return;
+      await api.patch(`/leads/${cardLeadId}`, { description: cardDescription.trim() || null });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lead', cardLeadId] });
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+    },
+    onError: (err) => alert(apiError(err)),
+  });
+
+  const noteMutation = useMutation({
+    mutationFn: async () => {
+      if (!cardLeadId) return;
+      await api.post(`/leads/${cardLeadId}/notes`, { content: noteContent.trim() });
+    },
+    onSuccess: () => {
+      setNoteContent('');
+      queryClient.invalidateQueries({ queryKey: ['lead', cardLeadId] });
+    },
+    onError: (err) => alert(apiError(err)),
+  });
+
+  const openCard = (leadId: string) => {
+    setCardLeadId(leadId);
+    setNoteContent('');
+  };
+
+  const closeCard = () => {
+    setCardLeadId(null);
+    setNoteContent('');
+  };
+
   const hasFilters = Boolean(
     search.trim() || statusFilter || sourceFilter || campaignFilter || dateFrom || dateTo
   );
@@ -307,7 +354,13 @@ export const LeadsPage: React.FC = () => {
               {leads.map((lead: any) => (
               <tr key={lead.id} className="hover:bg-slate-50">
                 <td className="px-4 py-3">
-                  <p className="font-semibold text-slate-900">{lead.name}</p>
+                  <button
+                    type="button"
+                    onClick={() => openCard(lead.id)}
+                    className="font-semibold text-slate-900 hover:text-blue-600 text-left"
+                  >
+                    {lead.name}
+                  </button>
                   {lead.patient && (
                     <p className="text-xs text-emerald-600">
                       Hasta: {lead.patient.hastaNo}
@@ -352,6 +405,9 @@ export const LeadsPage: React.FC = () => {
                 <td className="px-4 py-3 text-slate-500">{dateOnly(lead.createdAt)}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center justify-end gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => openCard(lead.id)}>
+                      Kart
+                    </Button>
                     {canManage && (
                       <Select
                         value={lead.status}
@@ -612,6 +668,118 @@ export const LeadsPage: React.FC = () => {
             />
           </Field>
         </div>
+      </Modal>
+
+      <Modal
+        open={!!cardLeadId}
+        onClose={closeCard}
+        title={`Lead Kartı - ${cardLead?.name || ''}`}
+        wide
+        footer={
+          <Button variant="secondary" onClick={closeCard}>
+            Kapat
+          </Button>
+        }
+      >
+        {cardLoading || !cardLead ? (
+          <LoadingText />
+        ) : (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <p className="text-xs text-slate-500">Telefon</p>
+                <p className="font-medium text-slate-800">{cardLead.phone}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">E-posta</p>
+                <p className="font-medium text-slate-800">{cardLead.email || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Kaynak</p>
+                <p className="font-medium text-slate-800">{cardLead.source}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Kampanya</p>
+                <p className="font-medium text-slate-800">{cardLead.campaign?.name || '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Durum</p>
+                <Badge tone={statusTone(cardLead.status)}>{LEAD_STATUS_LABEL[cardLead.status]}</Badge>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Kayıt Tarihi</p>
+                <p className="font-medium text-slate-800">{dateTime(cardLead.createdAt)}</p>
+              </div>
+            </div>
+
+            {cardLead.patient && (
+              <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                Hasta kaydı: {cardLead.patient.hastaNo} · {cardLead.patient.name} {cardLead.patient.surname}
+              </div>
+            )}
+
+            <div>
+              <Field label="Açıklama">
+                <Textarea
+                  rows={3}
+                  value={cardDescription}
+                  onChange={(e) => setCardDescription(e.target.value)}
+                  placeholder="Lead ile ilgili genel açıklama..."
+                />
+              </Field>
+              <div className="mt-2 flex justify-end">
+                <Button
+                  size="sm"
+                  onClick={() => descriptionMutation.mutate()}
+                  disabled={descriptionMutation.isPending}
+                >
+                  {descriptionMutation.isPending ? 'Kaydediliyor...' : 'Açıklamayı Kaydet'}
+                </Button>
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <h4 className="mb-2 text-sm font-semibold text-slate-700">
+                Notlar ({cardLead.notes?.length || 0})
+              </h4>
+              <div className="max-h-[240px] space-y-2 overflow-y-auto">
+                {cardLead.notes?.length ? (
+                  cardLead.notes.map((note: any) => (
+                    <div key={note.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge tone="slate">{note.createdBy?.name || 'Bilinmeyen kullanıcı'}</Badge>
+                        {note.createdBy?.role && (
+                          <Badge tone="blue">{ROLE_LABEL[note.createdBy.role] || note.createdBy.role}</Badge>
+                        )}
+                        <span className="text-xs text-slate-400">{dateTime(note.createdAt)}</span>
+                      </div>
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{note.content}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-slate-400">Henüz not eklenmedi.</p>
+                )}
+              </div>
+              <div className="mt-3 space-y-2">
+                <Textarea
+                  rows={3}
+                  value={noteContent}
+                  onChange={(e) => setNoteContent(e.target.value)}
+                  placeholder="Not yazın..."
+                />
+                <div className="flex justify-end">
+                  <Button
+                    size="sm"
+                    onClick={() => noteMutation.mutate()}
+                    disabled={!noteContent.trim() || noteMutation.isPending}
+                  >
+                    {noteMutation.isPending ? 'Ekleniyor...' : 'Not Ekle'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

@@ -48,6 +48,7 @@ const leadSchema = z.object({
   campaignId: z.string().uuid().optional().nullable(),
   status: leadStatusEnum.optional(),
   patientId: z.string().uuid().optional().nullable(),
+  description: z.string().max(5000).nullable().optional(),
   ...attributionFields,
   ...callbackFields,
 });
@@ -60,8 +61,13 @@ const leadUpdateSchema = z.object({
   campaignId: z.string().uuid().nullable().optional(),
   status: leadStatusEnum.optional(),
   patientId: z.string().uuid().nullable().optional(),
+  description: z.string().max(5000).nullable().optional(),
   ...attributionFields,
   ...callbackFields,
+});
+
+const leadNoteSchema = z.object({
+  content: z.string().trim().min(1).max(5000),
 });
 
 const includeRelations = {
@@ -218,6 +224,10 @@ router.get(
       where: { id: req.params.id },
       include: {
         ...includeRelations,
+        notes: {
+          include: { createdBy: { select: { id: true, name: true, role: true } } },
+          orderBy: { createdAt: 'desc' as const },
+        },
         conversionEvents: {
           include: {
             deliveries: { include: { integration: { select: { id: true, name: true, type: true } } } },
@@ -261,6 +271,7 @@ router.post(
         campaignId: campaignId || null,
         status,
         patientId: data.patientId || null,
+        description: data.description?.trim() || null,
         callbackAt: data.callbackAt ? new Date(data.callbackAt) : null,
         callbackNote: data.callbackNote || null,
         utmSource: data.utmSource,
@@ -290,7 +301,7 @@ router.patch(
   roleGuard('ADMIN', 'CALL_CENTER', 'SALES'),
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const data = leadUpdateSchema.parse(req.body);
-    const { email, campaignId, patientId, status, callbackAt, callbackNote, ...rest } = data;
+    const { email, campaignId, patientId, status, callbackAt, callbackNote, description, ...rest } = data;
 
     if (status === 'CALLBACK' && !callbackAt) {
       return res.status(400).json({ success: false, message: 'Tekrar arama zamanı seçilmelidir' });
@@ -310,6 +321,7 @@ router.patch(
         ...(email !== undefined ? { email: email || null } : {}),
         ...(patientId !== undefined ? { patientId } : {}),
         ...(campaignIdResolved !== undefined ? { campaignId: campaignIdResolved } : {}),
+        ...(description !== undefined ? { description: description?.trim() || null } : {}),
         ...(callbackAt !== undefined ? { callbackAt: callbackAt ? new Date(callbackAt) : null } : {}),
         ...(callbackNote !== undefined ? { callbackNote: callbackNote || null } : {}),
       },
@@ -331,6 +343,29 @@ router.patch(
       include: { campaign: true, patient: true },
     });
     res.json({ success: true, data: lead });
+  })
+);
+
+router.post(
+  '/:id/notes',
+  roleGuard('ADMIN', 'CALL_CENTER', 'SALES'),
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const data = leadNoteSchema.parse(req.body);
+    const lead = await prisma.lead.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!lead) {
+      return res.status(404).json({ success: false, message: 'Lead bulunamadı' });
+    }
+
+    const note = await prisma.leadNote.create({
+      data: {
+        leadId: req.params.id,
+        content: data.content,
+        createdById: req.user!.id,
+      },
+      include: { createdBy: { select: { id: true, name: true, role: true } } },
+    });
+
+    res.status(201).json({ success: true, data: note });
   })
 );
 

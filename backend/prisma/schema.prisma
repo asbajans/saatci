@@ -142,6 +142,7 @@ model User {
     handoversTo         CashHandover[]  @relation("CashHandoverTo")
     approvedHandovers   CashHandover[]  @relation("CashHandoverApprover")
     leadStatusChanges   LeadStatusHistory[] @relation("LeadStatusChanger")
+    leadNotes           LeadNote[]        @relation("LeadNoteAuthor")
     dentistProfile      DentistProfile?
     primaryPatients     Patient[]         @relation("PatientPrimaryDentist")
     diagnoses           Diagnosis[]       @relation("DiagnosisDoctor")
@@ -370,12 +371,14 @@ model Lead {
   lastContactAt  DateTime?
   callbackAt     DateTime?
   callbackNote   String?
+  description    String?
   createdAt      DateTime    @default(now())
 
   appointments   Appointment[]
   visits         PatientVisit[]
   commissions    Commission[]
   statusHistory  LeadStatusHistory[]
+  notes          LeadNote[]
   conversionEvents ConversionEvent[]
 
   @@index([status])
@@ -385,6 +388,19 @@ model Lead {
   @@index([externalId])
   @@index([createdAt])
   @@index([status, callbackAt])
+}
+
+model LeadNote {
+  id          String   @id @default(uuid()) @db.Uuid
+  leadId      String   @db.Uuid
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  content     String
+  createdById String?  @db.Uuid
+  createdBy   User?    @relation("LeadNoteAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@index([leadId, createdAt])
+  @@index([createdById])
 }
 
 model Campaign {
