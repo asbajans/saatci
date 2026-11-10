@@ -252,6 +252,7 @@ export const LeadsPage: React.FC = () => {
     onSuccess: () => {
       setNoteContent('');
       queryClient.invalidateQueries({ queryKey: ['lead', cardLeadId] });
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
     },
     onError: (err) => alert(apiError(err)),
   });
@@ -260,6 +261,9 @@ export const LeadsPage: React.FC = () => {
     setCardLeadId(leadId);
     setNoteContent('');
   };
+
+  const hasCardContent = (lead: any) =>
+    Boolean(lead.description?.trim() || (lead._count?.notes ?? 0) > 0);
 
   const closeCard = () => {
     setCardLeadId(null);
@@ -289,14 +293,14 @@ export const LeadsPage: React.FC = () => {
 
       <Card className="p-4">
         <div className="flex flex-wrap items-end gap-3">
-          <Field label="Ara" className="min-w-[220px] flex-1">
+          <Field label="Ara" className="w-full sm:w-auto sm:min-w-[220px] sm:flex-1">
             <Input
               placeholder="Ad veya telefon ile ara..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </Field>
-          <Field label="Durum" className="w-[170px]">
+          <Field label="Durum" className="w-full sm:w-[170px]">
             <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="">Tüm Durumlar</option>
               {Object.entries(LEAD_STATUS_LABEL).map(([key, label]) => (
@@ -306,7 +310,7 @@ export const LeadsPage: React.FC = () => {
               ))}
             </Select>
           </Field>
-          <Field label="Kaynak" className="w-[160px]">
+          <Field label="Kaynak" className="w-full sm:w-[160px]">
             <Select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
               <option value="">Tüm Kaynaklar</option>
               {sources.map((source) => (
@@ -316,7 +320,7 @@ export const LeadsPage: React.FC = () => {
               ))}
             </Select>
           </Field>
-          <Field label="Kampanya" className="w-[200px]">
+          <Field label="Kampanya" className="w-full sm:w-[200px]">
             <Select value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value)}>
               <option value="">Tüm Kampanyalar</option>
               {campaigns.map((campaign: any) => (
@@ -326,14 +330,14 @@ export const LeadsPage: React.FC = () => {
               ))}
             </Select>
           </Field>
-          <Field label="Başlangıç" className="w-[150px]">
+          <Field label="Başlangıç" className="w-full sm:w-[150px]">
             <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
           </Field>
-          <Field label="Bitiş" className="w-[150px]">
+          <Field label="Bitiş" className="w-full sm:w-[150px]">
             <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
           </Field>
           {hasFilters && (
-            <Button variant="secondary" onClick={clearFilters}>
+            <Button variant="secondary" className="w-full sm:w-auto" onClick={clearFilters}>
               Temizle
             </Button>
           )}
@@ -405,7 +409,11 @@ export const LeadsPage: React.FC = () => {
                 <td className="px-4 py-3 text-slate-500">{dateOnly(lead.createdAt)}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center justify-end gap-2">
-                    <Button size="sm" variant="secondary" onClick={() => openCard(lead.id)}>
+                    <Button
+                      size="sm"
+                      variant={hasCardContent(lead) ? 'success' : 'secondary'}
+                      onClick={() => openCard(lead.id)}
+                    >
                       Kart
                     </Button>
                     {canManage && (
@@ -454,8 +462,12 @@ export const LeadsPage: React.FC = () => {
                 Toplam <strong>{meta?.total ?? leads.length}</strong> lead · Sayfa {meta?.page ?? page} /{' '}
                 {meta?.totalPages ?? 1}
               </p>
-              <div className="flex items-center gap-2">
-                <Select value={pageSize} onChange={(e) => setPageSize(e.target.value)} className="w-[130px]">
+              <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
+                <Select
+                  value={pageSize}
+                  onChange={(e) => setPageSize(e.target.value)}
+                  className="w-full sm:w-[130px]"
+                >
                   <option value="20">20 / sayfa</option>
                   <option value="50">50 / sayfa</option>
                   <option value="100">100 / sayfa</option>
@@ -464,6 +476,7 @@ export const LeadsPage: React.FC = () => {
                 <Button
                   size="sm"
                   variant="secondary"
+                  className="flex-1 sm:flex-none"
                   disabled={page <= 1}
                   onClick={() => setPage((current) => Math.max(1, current - 1))}
                 >
@@ -472,6 +485,7 @@ export const LeadsPage: React.FC = () => {
                 <Button
                   size="sm"
                   variant="secondary"
+                  className="flex-1 sm:flex-none"
                   disabled={page >= (meta?.totalPages ?? 1)}
                   onClick={() => setPage((current) => current + 1)}
                 >
@@ -685,7 +699,7 @@ export const LeadsPage: React.FC = () => {
           <LoadingText />
         ) : (
           <div className="space-y-5">
-            <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
               <div>
                 <p className="text-xs text-slate-500">Telefon</p>
                 <p className="font-medium text-slate-800">{cardLead.phone}</p>

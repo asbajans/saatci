@@ -81,6 +81,7 @@ const includeRelations = {
     take: 3,
   },
   visits: { select: { id: true, protokolNo: true, status: true, visitDate: true } },
+  _count: { select: { notes: true } },
 } as const;
 
 const leadsQuerySchema = z.object({
