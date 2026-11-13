@@ -1,8 +1,9 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useAppStore } from '../../store/appStore';
 import { PatientPicker } from '../../components/PatientPicker';
+import { LeadPicker } from '../../components/LeadPicker';
 import {
   Badge,
   Button,
@@ -22,6 +23,7 @@ import {
   APPT_STATUS_LABEL,
   APPT_TYPE_LABEL,
   ROLE_LABEL,
+  SALES_STATUS_LABEL,
   SOURCES,
   VISIT_STATUS_LABEL,
   apiError,
@@ -50,6 +52,36 @@ const emptyForm = {
   notes: '',
 };
 
+type MoveDrag = {
+  appt: any;
+  fromColumnId: string;
+  fromSlot: string;
+  hoverColumnId: string;
+  hoverSlot: string;
+  moved: boolean;
+  duration: number;
+};
+
+type EditApptForm = {
+  type: string;
+  userId: string;
+  dateTime: string;
+  endTime: string;
+  status: string;
+  salesStatus: string;
+  notes: string;
+};
+
+const emptyEditForm: EditApptForm = {
+  type: 'MEETING',
+  userId: '',
+  dateTime: '',
+  endTime: '',
+  status: 'PENDING',
+  salesStatus: '',
+  notes: '',
+};
+
 export const AppointmentsPage: React.FC = () => {
   const { user } = useAppStore();
   const queryClient = useQueryClient();
@@ -64,9 +96,10 @@ export const AppointmentsPage: React.FC = () => {
   const [form, setForm] = useState({ ...emptyForm });
   const [reschedule, setReschedule] = useState<any>(null);
   const [rescheduleDate, setRescheduleDate] = useState('');
-  const [selectedSlot, setSelectedSlot] = useState<{ slot: string; column: any; appt?: any } | null>(null);
-  const [slotMenuAnchor, setSlotMenuAnchor] = useState<{ x: number; y: number } | null>(null);
-  const slotMenuRef = useRef<HTMLDivElement>(null);
+  const [editingAppt, setEditingAppt] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState<EditApptForm>({ ...emptyEditForm });
+  const [moveDrag, setMoveDrag] = useState<MoveDrag | null>(null);
+  const moveDragRef = useRef<MoveDrag | null>(null);
   const [drag, setDrag] = useState<{ columnId: string; userName: string; role: string; slots: string[] } | null>(null);
   const [slotMode, setSlotMode] = useState<'appointment' | 'block'>('appointment');
   const dragRef = useRef<{ columnId: string; userName: string; role: string; slots: string[] } | null>(null);
@@ -117,21 +150,6 @@ export const AppointmentsPage: React.FC = () => {
     },
   });
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (slotMenuAnchor && slotMenuRef.current && !slotMenuRef.current.contains(event.target as Node)) {
-        setSlotMenuAnchor(null);
-        setSelectedSlot(null);
-      }
-    };
-    if (slotMenuAnchor) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [slotMenuAnchor]);
-
   const { data: appointments = [], isLoading } = useQuery({
     queryKey: ['appointments', { status, type, scope, channel, patientId: patientFilterId }],
     queryFn: async () => {
@@ -153,11 +171,6 @@ export const AppointmentsPage: React.FC = () => {
     queryFn: async () => (await api.get('/patients')).data.data as any[],
   });
 
-  const { data: leads = [] } = useQuery({
-    queryKey: ['leads'],
-    queryFn: async () => (await api.get('/leads')).data.data as any[],
-  });
-
   const { data: staff = [] } = useQuery({
     queryKey: ['staff'],
     queryFn: async () => (await api.get('/users/staff')).data.data as any[],
@@ -171,6 +184,14 @@ export const AppointmentsPage: React.FC = () => {
   const staffOptions = useMemo(
     () => staff.filter((s: any) => (form.type === 'MEETING' ? s.role === 'SALES' : s.role === 'DENTIST')),
     [staff, form.type]
+  );
+
+  const editStaffOptions = useMemo(
+    () =>
+      staff.filter((s: any) =>
+        editForm.type === 'MEETING' ? s.role === 'SALES' : s.role === 'DENTIST'
+      ),
+    [staff, editForm.type]
   );
 
   const allStaff = useMemo(() => staff, [staff]);
@@ -309,44 +330,6 @@ export const AppointmentsPage: React.FC = () => {
     dragRef.current = drag;
   }, [drag]);
 
-  useEffect(() => {
-    const up = () => {
-      const d = dragRef.current;
-      if (d && d.slots.length) {
-        const sorted = [...d.slots].sort((a, b) => toMin(a) - toMin(b));
-        const startTime = sorted[0];
-        const endTime = addMinutes(sorted[sorted.length - 1], 15);
-        if (slotMode === 'block') {
-          setBlockModal({
-            userId: d.columnId,
-            userName: d.userName,
-            date,
-            startTime,
-            endTime,
-            status: 'LEAVE',
-            reason: '',
-          });
-        } else {
-          setForm({
-            ...emptyForm,
-            target: 'patient',
-            patientId: '',
-            leadId: '',
-            type: d.role === 'DENTIST' ? 'EXAMINATION' : 'MEETING',
-            userId: d.columnId,
-            dateTime: `${date}T${startTime}`,
-            endTime,
-            notes: '',
-          });
-          setCreateOpen(true);
-        }
-      }
-      setDrag(null);
-    };
-    window.addEventListener('mouseup', up);
-    return () => window.removeEventListener('mouseup', up);
-  }, [date, slotMode]);
-
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['appointments'] });
     queryClient.invalidateQueries({ queryKey: ['visits'] });
@@ -409,6 +392,173 @@ export const AppointmentsPage: React.FC = () => {
     },
     onError: (err) => alert(apiError(err)),
   });
+
+  const openAppointment = useCallback((appt: any) => {
+    setEditingAppt(appt);
+    setEditForm({
+      type: appt.type,
+      userId: appt.user?.id || appt.userId || '',
+      dateTime: toLocalInput(appt.appointmentDate),
+      endTime: appt.endDate ? toLocalInput(appt.endDate).slice(11, 16) : '',
+      status: appt.status,
+      salesStatus: appt.salesStatus || '',
+      notes: appt.notes || '',
+    });
+  }, []);
+
+  const editMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingAppt) return;
+      const datePart = editForm.dateTime.slice(0, 10);
+      await api.patch(`/appointments/${editingAppt.id}`, {
+        type: editForm.type,
+        userId: editForm.userId || null,
+        appointmentDate: fromLocalInput(editForm.dateTime),
+        endDate: editForm.endTime ? fromLocalInput(`${datePart}T${editForm.endTime}`) : null,
+        status: editForm.status,
+        salesStatus: editForm.type === 'MEETING' ? editForm.salesStatus || null : null,
+        notes: editForm.notes || undefined,
+      });
+    },
+    onSuccess: () => {
+      invalidate();
+      setEditingAppt(null);
+    },
+    onError: (err) => alert(apiError(err)),
+  });
+
+  const salesStatusMutation = useMutation({
+    mutationFn: async ({ id, salesStatus }: { id: string; salesStatus: string | null }) => {
+      await api.patch(`/appointments/${id}`, { salesStatus });
+    },
+    onSuccess: invalidate,
+    onError: (err) => alert(apiError(err)),
+  });
+
+  const moveMutation = useMutation({
+    mutationFn: async (payload: {
+      id: string;
+      userId: string;
+      appointmentDate: string;
+      endDate: string;
+    }) => {
+      await api.patch(`/appointments/${payload.id}`, {
+        userId: payload.userId,
+        appointmentDate: payload.appointmentDate,
+        endDate: payload.endDate,
+      });
+    },
+    onSuccess: invalidate,
+    onError: (err) => alert(apiError(err)),
+  });
+
+  useEffect(() => {
+    moveDragRef.current = moveDrag;
+  }, [moveDrag]);
+
+  useEffect(() => {
+    const up = () => {
+      const moving = moveDragRef.current;
+      if (moving) {
+        const targetColumn = slotColumns.find((c: any) => c.id === moving.hoverColumnId);
+        const samePlace =
+          moving.hoverColumnId === moving.fromColumnId && moving.hoverSlot === moving.fromSlot;
+
+        if (moving.moved && !samePlace) {
+          const compatible =
+            moving.appt.type === 'MEETING'
+              ? targetColumn?.role === 'SALES'
+              : targetColumn?.role === 'DENTIST';
+          const targetState = slotState(moving.hoverColumnId, moving.hoverSlot);
+          const targetBlocked = !!blockAt(moving.hoverColumnId, moving.hoverSlot);
+          if (!compatible) {
+            alert(
+              moving.appt.type === 'MEETING'
+                ? 'Görüşme randevusu sadece satış personeline taşınabilir.'
+                : 'Muayene/tedavi randevusu sadece doktora taşınabilir.'
+            );
+          } else if (targetState.closed || targetBlocked) {
+            alert('Seçilen saat kapalı veya molada; randevu taşınamaz.');
+          } else {
+            const targetStart = toMin(moving.hoverSlot);
+            const targetEnd = targetStart + moving.duration;
+            const occupied = visibleAppointments.some((a: any) => {
+              if (a.id === moving.appt.id) return false;
+              const uid = a.user?.id || a.userId;
+              if (uid !== moving.hoverColumnId) return false;
+              const start = toMin(slotTimeOf(a.appointmentDate));
+              const end = a.endDate
+                ? toMin(slotTimeOf(a.endDate))
+                : start + (a.duration || 30);
+              return targetStart < end && targetEnd > start;
+            });
+            if (occupied) {
+              alert('Seçilen saatte başka bir randevu bulunuyor.');
+            } else {
+              moveMutation.mutate({
+                id: moving.appt.id,
+                userId: moving.hoverColumnId,
+                appointmentDate: fromLocalInput(`${date}T${moving.hoverSlot}`),
+                endDate: fromLocalInput(`${date}T${addMinutes(moving.hoverSlot, moving.duration)}`),
+              });
+            }
+          }
+          setMoveDrag(null);
+          setDrag(null);
+          return;
+        }
+
+        openAppointment(moving.appt);
+        setMoveDrag(null);
+        setDrag(null);
+        return;
+      }
+
+      const d = dragRef.current;
+      if (d && d.slots.length) {
+        const sorted = [...d.slots].sort((a, b) => toMin(a) - toMin(b));
+        const startTime = sorted[0];
+        const endTime = addMinutes(sorted[sorted.length - 1], 15);
+        if (slotMode === 'block') {
+          setBlockModal({
+            userId: d.columnId,
+            userName: d.userName,
+            date,
+            startTime,
+            endTime,
+            status: 'LEAVE',
+            reason: '',
+          });
+        } else {
+          setForm({
+            ...emptyForm,
+            target: 'patient',
+            patientId: '',
+            leadId: '',
+            type: d.role === 'DENTIST' ? 'EXAMINATION' : 'MEETING',
+            userId: d.columnId,
+            dateTime: `${date}T${startTime}`,
+            endTime,
+            notes: '',
+          });
+          setCreateOpen(true);
+        }
+      }
+      setDrag(null);
+    };
+    window.addEventListener('mouseup', up);
+    return () => window.removeEventListener('mouseup', up);
+  }, [
+    date,
+    slotMode,
+    slotColumns,
+    visibleAppointments,
+    workingHours,
+    weeklySchedules,
+    scheduleBlocks,
+    moveMutation,
+    openAppointment,
+  ]);
 
   const blockMutation = useMutation({
     mutationFn: async (payload: any) => {
@@ -567,7 +717,13 @@ export const AppointmentsPage: React.FC = () => {
                 <span className="inline-block h-3 w-3 rounded-sm bg-blue-500" /> Görüşme
               </span>
               <span className="flex items-center gap-1">
-                <span className="inline-block h-3 w-3 rounded-sm bg-emerald-500" /> Muayene / Tedavi
+                <span className="inline-block h-3 w-3 rounded-sm bg-emerald-500" /> Satış Oldu / Tedavi
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-3 w-3 rounded-sm bg-red-500" /> Olumsuz
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-3 w-3 rounded-sm bg-violet-500" /> Tekrar Aranacak
               </span>
               <span className="flex items-center gap-1">
                 <span className="inline-block h-3 w-3 rounded-sm bg-amber-500" /> Öğle
@@ -578,10 +734,17 @@ export const AppointmentsPage: React.FC = () => {
               <span className="text-slate-500">
                 {slotMode === 'block'
                   ? 'Fareyle slotları sürükleyip seçin, bıraktığınızda kapatma penceresi açılır.'
-                  : 'Slota tıklayın veya sürükleyerek aralık seçin; randevu penceresi açılır.'}
+                  : 'Randevuyu tutup başka saat/personele sürükleyin; açmak için üzerine tıklayın.'}
               </span>
             </div>
-            <div className="overflow-x-auto select-none" onMouseLeave={() => setDrag(null)}>
+            <div
+              className="overflow-x-auto select-none"
+              onMouseLeave={() => {
+                moveDragRef.current = null;
+                setMoveDrag(null);
+                setDrag(null);
+              }}
+            >
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr>
@@ -618,17 +781,45 @@ export const AppointmentsPage: React.FC = () => {
                           const start = slotTimeOf(appt.appointmentDate);
                           const isStart = start === slot;
                           const tone =
-                            appt.type === 'MEETING'
-                              ? 'bg-blue-100 text-blue-900 border-l-4 border-l-blue-500'
-                              : 'bg-emerald-100 text-emerald-900 border-l-4 border-l-emerald-500';
+                            appt.salesStatus === 'SOLD'
+                              ? 'bg-emerald-100 text-emerald-900 border-l-4 border-l-emerald-500'
+                              : appt.salesStatus === 'NEGATIVE'
+                                ? 'bg-red-100 text-red-900 border-l-4 border-l-red-500'
+                                : appt.salesStatus === 'CALLBACK'
+                                  ? 'bg-violet-100 text-violet-900 border-l-4 border-l-violet-500'
+                                  : appt.type === 'MEETING'
+                                    ? 'bg-blue-100 text-blue-900 border-l-4 border-l-blue-500'
+                                    : 'bg-emerald-100 text-emerald-900 border-l-4 border-l-emerald-500';
                           return (
                             <td
                               key={c.id}
-                              className={`border border-slate-300 px-2 py-1 align-top cursor-pointer ${tone}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedSlot({ slot, column: c, appt });
-                                setSlotMenuAnchor({ x: e.clientX, y: e.clientY });
+                              title="Açmak için tıklayın; başka saat veya personele taşımak için sürükleyin."
+                              className={`border border-slate-300 px-2 py-1 align-top cursor-grab active:cursor-grabbing ${tone} ${
+                                moveDrag?.appt.id === appt.id ? 'opacity-60' : ''
+                              }`}
+                              onMouseDown={(e) => {
+                                if (e.button !== 0) return;
+                                e.preventDefault();
+                                const apptStart = slotTimeOf(appt.appointmentDate);
+                                const apptEnd = appt.endDate
+                                  ? slotTimeOf(appt.endDate)
+                                  : addMinutes(apptStart, appt.duration || 30);
+                                setMoveDrag({
+                                  appt,
+                                  fromColumnId: c.id,
+                                  fromSlot: apptStart,
+                                  hoverColumnId: c.id,
+                                  hoverSlot: apptStart,
+                                  moved: false,
+                                  duration: Math.max(15, toMin(apptEnd) - toMin(apptStart)),
+                                });
+                              }}
+                              onMouseEnter={() => {
+                                if (moveDrag) {
+                                  setMoveDrag((m) =>
+                                    m ? { ...m, hoverColumnId: c.id, hoverSlot: slot, moved: true } : m
+                                  );
+                                }
                               }}
                             >
                               {isStart ? (
@@ -642,6 +833,9 @@ export const AppointmentsPage: React.FC = () => {
                                   </p>
                                   <p className="text-[10px] text-slate-500">
                                     {APPT_TYPE_LABEL[appt.type] || appt.type}
+                                    {appt.salesStatus
+                                      ? ` · ${SALES_STATUS_LABEL[appt.salesStatus] || appt.salesStatus}`
+                                      : ''}
                                   </p>
                                 </>
                               ) : (
@@ -678,6 +872,14 @@ export const AppointmentsPage: React.FC = () => {
                           );
                         }
 
+                        const isMoveTarget =
+                          !!moveDrag &&
+                          moveDrag.moved &&
+                          moveDrag.hoverColumnId === c.id &&
+                          moveDrag.hoverSlot === slot;
+                        const moveCompatible =
+                          !moveDrag ||
+                          (moveDrag.appt.type === 'MEETING' ? c.role === 'SALES' : c.role === 'DENTIST');
                         const base = outside
                           ? `${cellState.tone} cursor-not-allowed`
                           : 'bg-white text-slate-300 hover:bg-blue-50 cursor-pointer';
@@ -687,6 +889,12 @@ export const AppointmentsPage: React.FC = () => {
                             title={outside ? `${cellState.label} - randevu verilemez` : undefined}
                             className={`border border-slate-300 px-2 py-1 text-center align-top select-none text-[10px] font-semibold ${base} ${
                               !outside && slotMode === 'block' ? 'cursor-crosshair' : ''
+                            } ${
+                              isMoveTarget
+                                ? moveCompatible
+                                  ? 'bg-blue-200 text-blue-900 ring-2 ring-inset ring-blue-500'
+                                  : 'bg-red-100 text-red-700 ring-2 ring-inset ring-red-400'
+                                : ''
                             }`}
                             style={
                               isSelected
@@ -694,11 +902,19 @@ export const AppointmentsPage: React.FC = () => {
                                 : undefined
                             }
                             onMouseDown={() => {
-                              if (!outside) {
+                              if (!outside && !moveDrag) {
                                 setDrag({ columnId: c.id, userName: c.name, role: c.role, slots: [slot] });
                               }
                             }}
                             onMouseEnter={() => {
+                              if (moveDrag) {
+                                if (!outside) {
+                                  setMoveDrag((m) =>
+                                    m ? { ...m, hoverColumnId: c.id, hoverSlot: slot, moved: true } : m
+                                  );
+                                }
+                                return;
+                              }
                               if (!outside) {
                                 setDrag((d) =>
                                   d && d.columnId === c.id && !d.slots.includes(slot)
@@ -708,7 +924,7 @@ export const AppointmentsPage: React.FC = () => {
                               }
                             }}
                           >
-                            {isSelected ? '✓' : outside ? cellState.label : ''}
+                            {isSelected ? '✓' : isMoveTarget ? '⇚' : outside ? cellState.label : ''}
                           </td>
                         );
                       })}
@@ -717,59 +933,6 @@ export const AppointmentsPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
-            {slotMenuAnchor && selectedSlot && (
-              <div 
-                ref={slotMenuRef}
-                className="fixed z-50 w-48 bg-white rounded-lg shadow-lg border border-slate-200 py-1"
-                style={{ top: slotMenuAnchor.y, left: slotMenuAnchor.x }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <button 
-                  className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100"
-                  onClick={() => {
-                    setForm({
-                      ...emptyForm,
-                      target: selectedSlot.appt.patient ? 'patient' : 'lead',
-                      patientId: selectedSlot.appt.patientId || '',
-                      leadId: selectedSlot.appt.leadId || '',
-                      type: selectedSlot.appt.type,
-                      userId: selectedSlot.column.id,
-                      dateTime: toLocalInput(new Date(`${date}T${selectedSlot.slot}`)),
-                      notes: selectedSlot.appt.notes || '',
-                    });
-                    setCreateOpen(true);
-                  }}
-                >
-                  Düzenle
-                </button>
-                <button 
-                  className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100"
-                  onClick={() => {
-                    arriveMutation.mutate(selectedSlot.appt.id);
-                  }}
-                  disabled={arriveMutation.isPending || selectedSlot.appt.status === 'CANCELLED' || selectedSlot.appt.status === 'NO_SHOW'}
-                >
-                  Geliş Yap
-                </button>
-                <button 
-                  className="w-full text-left px-4 py-2 text-sm text-amber-600 hover:bg-amber-50"
-                  onClick={() => {
-                    setReschedule(selectedSlot.appt);
-                    setRescheduleDate(toLocalInput(selectedSlot.appt.appointmentDate));
-                  }}
-                >
-                  Ertele
-                </button>
-                <button 
-                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
-                  onClick={() => {
-                    statusMutation.mutate({ id: selectedSlot.appt.id, status: 'CANCELLED' });
-                  }}
-                >
-                  İptal Et
-                </button>
-              </div>
-            )}
           </>
         ) : visibleAppointments.length === 0 ? (
           <Empty title="Randevu bulunamadı" hint="Filtreleri seçin veya yeni randevu oluşturun." />
@@ -784,6 +947,7 @@ export const AppointmentsPage: React.FC = () => {
               'Personel',
               'Randevuyu Veren',
               'Durum',
+              'Satış Durumu',
               'Geliş',
               'İşlem',
             ]}
@@ -828,6 +992,34 @@ export const AppointmentsPage: React.FC = () => {
                     </Select>
                   </td>
                   <td className="px-4 py-3">
+                    {a.type === 'MEETING' ? (
+                      <Select
+                        value={a.salesStatus || ''}
+                        onChange={(e) =>
+                          salesStatusMutation.mutate({ id: a.id, salesStatus: e.target.value || null })
+                        }
+                        className={`text-xs py-1 max-w-[160px] ${
+                          a.salesStatus === 'SOLD'
+                            ? 'border-emerald-400 bg-emerald-50 text-emerald-800'
+                            : a.salesStatus === 'NEGATIVE'
+                              ? 'border-red-400 bg-red-50 text-red-700'
+                              : a.salesStatus === 'CALLBACK'
+                                ? 'border-violet-400 bg-violet-50 text-violet-700'
+                                : ''
+                        }`}
+                      >
+                        <option value="">Belirlenmedi</option>
+                        {Object.entries(SALES_STATUS_LABEL).map(([key, label]) => (
+                          <option key={key} value={key}>
+                            {label}
+                          </option>
+                        ))}
+                      </Select>
+                    ) : (
+                      <span className="text-xs text-slate-400">-</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
                     {a.visit ? (
                       <div>
                         <p className="font-mono text-xs text-slate-600">{a.visit.protokolNo}</p>
@@ -849,18 +1041,23 @@ export const AppointmentsPage: React.FC = () => {
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {canReschedule && (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => {
-                          setReschedule(a);
-                          setRescheduleDate(toLocalInput(a.appointmentDate));
-                        }}
-                      >
-                        Ertele
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="secondary" onClick={() => openAppointment(a)}>
+                        Aç
                       </Button>
-                    )}
+                      {canReschedule && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            setReschedule(a);
+                            setRescheduleDate(toLocalInput(a.appointmentDate));
+                          }}
+                        >
+                          Ertele
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );
@@ -923,16 +1120,11 @@ export const AppointmentsPage: React.FC = () => {
             />
           </Field>
         ) : (
-          <Field label="Lead *" hint="Lead hasta kaydına dönüşmeden randevu verilebilir.">
-            <Select value={form.leadId} onChange={(e) => setForm({ ...form, leadId: e.target.value })}>
-              <option value="">Lead seçin</option>
-              {leads.map((l: any) => (
-                <option key={l.id} value={l.id}>
-                  {l.name} · {l.phone} · {l.source}
-                  {l.patient ? ' (hastaya dönüştü)' : ''}
-                </option>
-              ))}
-            </Select>
+          <Field
+            label="Lead *"
+            hint="Lead hasta kaydına dönüşmeden randevu verilebilir. Kayıtlı değilse aynı ekrandan yeni lead oluşturabilirsiniz."
+          >
+            <LeadPicker value={form.leadId} onChange={(leadId) => setForm({ ...form, leadId })} />
           </Field>
         )}
 
@@ -1039,6 +1231,165 @@ export const AppointmentsPage: React.FC = () => {
         <p className="text-xs text-slate-400">
           Randevu numarası otomatik oluşturulur. Randevuyu veren kişi olarak siz kaydedilirsiniz.
         </p>
+      </Modal>
+
+      <Modal
+        open={!!editingAppt}
+        onClose={() => setEditingAppt(null)}
+        title={`Randevu Detayı - ${editingAppt?.patient?.name || editingAppt?.lead?.name || ''}`}
+        wide
+        footer={
+          <>
+            {editingAppt && editingAppt.visit && (
+              <span className="mr-auto text-xs text-slate-500">
+                Geliş kaydı: <strong>{editingAppt.visit.protokolNo}</strong>
+              </span>
+            )}
+            {editingAppt &&
+              !editingAppt.visit &&
+              canArrive &&
+              editingAppt.status !== 'CANCELLED' &&
+              editingAppt.status !== 'NO_SHOW' && (
+                <Button
+                  variant="success"
+                  onClick={() => {
+                    arriveMutation.mutate(editingAppt.id);
+                    setEditingAppt(null);
+                  }}
+                  disabled={arriveMutation.isPending}
+                >
+                  Geliş Yap
+                </Button>
+              )}
+            {editingAppt && editingAppt.status !== 'CANCELLED' && (
+              <Button
+                variant="danger"
+                onClick={() => {
+                  if (confirm('Bu randevuyu iptal etmek istiyor musunuz?')) {
+                    statusMutation.mutate({ id: editingAppt.id, status: 'CANCELLED' });
+                    setEditingAppt(null);
+                  }
+                }}
+              >
+                İptal Et
+              </Button>
+            )}
+            <Button variant="secondary" onClick={() => setEditingAppt(null)}>
+              Kapat
+            </Button>
+            <Button onClick={() => editMutation.mutate()} disabled={editMutation.isPending || !editForm.dateTime}>
+              {editMutation.isPending ? 'Kaydediliyor...' : 'Kaydet'}
+            </Button>
+          </>
+        }
+      >
+        {editingAppt && (
+          <>
+            <div className="rounded-lg bg-slate-50 px-4 py-3">
+              <p className="text-sm font-semibold text-slate-900">
+                {editingAppt.patient?.name || editingAppt.lead?.name || '-'}{' '}
+                {editingAppt.patient?.surname || editingAppt.lead?.surname || ''}
+              </p>
+              <p className="text-xs text-slate-500">
+                {editingAppt.randevuNo} ·{' '}
+                {editingAppt.patient?.hastaNo
+                  ? editingAppt.patient.hastaNo
+                  : 'Lead · hasta kaydı yok'}{' '}
+                · {editingAppt.patient?.phone || editingAppt.lead?.phone || '-'}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Field label="Randevu Türü">
+                <Select
+                  value={editForm.type}
+                  onChange={(e) => setEditForm({ ...editForm, type: e.target.value, userId: '' })}
+                >
+                  {Object.entries(APPT_TYPE_LABEL).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field
+                label="Personel"
+                hint={
+                  editForm.type === 'MEETING'
+                    ? 'Görüşmeler satış personeli tarafından yapılır.'
+                    : 'Muayene/tedavi doktor tarafından yapılır.'
+                }
+              >
+                <Select
+                  value={editForm.userId}
+                  onChange={(e) => setEditForm({ ...editForm, userId: e.target.value })}
+                >
+                  <option value="">Atanmadı</option>
+                  {editStaffOptions.map((s: any) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({ROLE_LABEL[s.role]})
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Field label="Başlangıç Tarihi ve Saati *">
+                <Input
+                  type="datetime-local"
+                  value={editForm.dateTime}
+                  onChange={(e) => setEditForm({ ...editForm, dateTime: e.target.value })}
+                />
+              </Field>
+              <Field label="Bitiş Saati" hint="Boş bırakılırsa randevu 30 dk kabul edilir.">
+                <Input
+                  type="time"
+                  value={editForm.endTime}
+                  onChange={(e) => setEditForm({ ...editForm, endTime: e.target.value })}
+                />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Field label="Durum">
+                <Select
+                  value={editForm.status}
+                  onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                >
+                  {Object.entries(APPT_STATUS_LABEL).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              {editForm.type === 'MEETING' && (
+                <Field label="Satış Durumu" hint="Görüşme sonrası sonucu seçin.">
+                  <Select
+                    value={editForm.salesStatus}
+                    onChange={(e) => setEditForm({ ...editForm, salesStatus: e.target.value })}
+                  >
+                    <option value="">Belirlenmedi</option>
+                    {Object.entries(SALES_STATUS_LABEL).map(([key, label]) => (
+                      <option key={key} value={key}>
+                        {label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              )}
+            </div>
+
+            <Field label="Not">
+              <Textarea
+                rows={2}
+                value={editForm.notes}
+                onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+              />
+            </Field>
+          </>
+        )}
       </Modal>
 
       <Modal

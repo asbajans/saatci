@@ -10,6 +10,7 @@ const router = Router();
 
 const statusEnum = z.enum(['PENDING', 'CONFIRMED', 'COMPLETED', 'CANCELLED', 'NO_SHOW']);
 const typeEnum = z.enum(['MEETING', 'EXAMINATION', 'TREATMENT']);
+const salesStatusEnum = z.enum(['SOLD', 'NEGATIVE', 'CALLBACK']);
 
 const appointmentSchema = z
   .object({
@@ -19,6 +20,7 @@ const appointmentSchema = z
     userId: z.string().uuid().optional().nullable(),
     type: typeEnum,
     status: statusEnum.optional(),
+    salesStatus: salesStatusEnum.optional().nullable(),
     channel: z.string().optional(),
     campaignId: z.string().uuid().optional().nullable(),
     appointmentDate: z.string().datetime(),
@@ -40,6 +42,7 @@ const appointmentUpdateSchema = z.object({
   userId: z.string().uuid().nullable().optional(),
   type: typeEnum.optional(),
   status: statusEnum.optional(),
+  salesStatus: salesStatusEnum.optional().nullable(),
   channel: z.string().optional(),
   campaignId: z.string().uuid().nullable().optional(),
   appointmentDate: z.string().datetime().optional(),
@@ -194,6 +197,7 @@ router.post(
         createdById: req.user!.id,
         type: data.type,
         status: data.status ?? 'PENDING',
+        salesStatus: data.salesStatus ?? null,
         channel: resolved.channel,
         campaignId: resolved.campaignId,
         appointmentDate: new Date(data.appointmentDate),

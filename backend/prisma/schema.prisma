@@ -29,6 +29,12 @@ enum AppointmentStatus {
   NO_SHOW
 }
 
+enum SalesStatus {
+  SOLD
+  NEGATIVE
+  CALLBACK
+}
+
 enum LeadStatus {
   NEW
   CONTACTED
@@ -262,6 +268,7 @@ model Appointment {
   createdBy      User?             @relation("AppointmentCreator", fields: [createdById], references: [id])
   type           AppointmentType
   status         AppointmentStatus @default(PENDING)
+  salesStatus    SalesStatus?
   channel        String?
   campaignId     String?
   campaign       Campaign?         @relation(fields: [campaignId], references: [id])

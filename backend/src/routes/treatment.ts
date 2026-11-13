@@ -38,6 +38,22 @@ const treatmentPlanSchema = z.object({
   items: z.array(planItemSchema),
 });
 
+const treatmentPlanUpdateSchema = z.object({
+  doctorId: z.string().optional().nullable(),
+  tariffId: z.string().uuid().optional().nullable(),
+  totalPrice: z.string().optional(),
+  discount: z.string().optional(),
+  subtotal: z.string().optional().nullable(),
+  vatAmount: z.string().optional(),
+  grandTotal: z.string().optional().nullable(),
+  currency: z.string().optional(),
+  notes: z.string().optional().nullable(),
+  paymentPlan: z.record(z.any()).optional().nullable(),
+  channel: z.string().optional(),
+  campaignId: z.string().uuid().optional().nullable(),
+  items: z.array(planItemSchema).optional(),
+});
+
 const statusEnum = z.enum(['DRAFT', 'APPROVED', 'IN_PROGRESS', 'COMPLETED']);
 
 const includeRelations = {
@@ -161,6 +177,102 @@ router.post(
       include: { ...includeRelations, doctor: { select: { id: true, name: true, role: true } } },
     });
     res.status(201).json({ success: true, data: plan });
+  })
+);
+
+router.patch(
+  '/:id',
+  roleGuard('ADMIN', 'SALES', 'DENTIST'),
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const data = treatmentPlanUpdateSchema.parse(req.body);
+    const existing = await prisma.treatmentPlan.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, patientId: true, status: true },
+    });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Tedavi planı bulunamadı' });
+    }
+    if (existing.status !== 'DRAFT') {
+      return res.status(400).json({ success: false, message: 'Sadece taslak planlar düzenlenebilir' });
+    }
+
+    const resolved =
+      data.channel !== undefined || data.campaignId !== undefined
+        ? await resolveChannel(existing.patientId, data.channel, data.campaignId)
+        : null;
+
+    const plan = await prisma.$transaction(async (tx) => {
+      if (data.items) {
+        await tx.treatmentItem.deleteMany({ where: { planId: existing.id } });
+      }
+      return tx.treatmentPlan.update({
+        where: { id: existing.id },
+        data: {
+          ...(data.doctorId !== undefined ? { doctorId: data.doctorId || null } : {}),
+          ...(data.totalPrice !== undefined ? { totalPrice: parseFloat(data.totalPrice) } : {}),
+          ...(data.discount !== undefined ? { discount: parseFloat(data.discount) } : {}),
+          ...(data.subtotal !== undefined
+            ? { subtotal: data.subtotal ? parseFloat(data.subtotal) : null }
+            : {}),
+          ...(data.vatAmount !== undefined ? { vatAmount: parseFloat(data.vatAmount) } : {}),
+          ...(data.grandTotal !== undefined
+            ? { grandTotal: data.grandTotal ? parseFloat(data.grandTotal) : null }
+            : {}),
+          ...(data.currency !== undefined ? { currency: data.currency } : {}),
+          ...(data.notes !== undefined ? { notes: data.notes } : {}),
+          ...(data.tariffId !== undefined ? { tariffId: data.tariffId || null } : {}),
+          ...(data.paymentPlan ? { paymentPlan: data.paymentPlan } : {}),
+          ...(resolved ? { channel: resolved.channel, campaignId: resolved.campaignId } : {}),
+          ...(data.items
+            ? {
+                items: {
+                  create: data.items.map((item) => {
+                    const price = parseFloat(item.price);
+                    const discount = item.discount ?? 0;
+                    return {
+                      toothNo: item.toothNo,
+                      serviceId: item.serviceId || undefined,
+                      tariffItemId: item.tariffItemId || undefined,
+                      code: item.code,
+                      treatment: item.treatment,
+                      price,
+                      quantity: item.quantity,
+                      vatRate: item.vatRate ?? 0,
+                      discount,
+                      total: item.total ?? Math.max(0, price * item.quantity - discount),
+                      stepOrder: item.stepOrder,
+                    };
+                  }),
+                },
+              }
+            : {}),
+        },
+        include: { ...includeRelations, doctor: { select: { id: true, name: true, role: true } } },
+      });
+    });
+    res.json({ success: true, data: plan });
+  })
+);
+
+router.delete(
+  '/:id',
+  roleGuard('ADMIN', 'SALES', 'DENTIST'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const existing = await prisma.treatmentPlan.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, status: true, _count: { select: { invoices: true } } },
+    });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Tedavi planı bulunamadı' });
+    }
+    if (existing.status !== 'DRAFT') {
+      return res.status(400).json({ success: false, message: 'Sadece taslak planlar silinebilir' });
+    }
+    if (existing._count.invoices > 0) {
+      return res.status(400).json({ success: false, message: 'Faturası olan plan silinemez' });
+    }
+    await prisma.treatmentPlan.delete({ where: { id: existing.id } });
+    res.json({ success: true, data: { id: existing.id } });
   })
 );
 

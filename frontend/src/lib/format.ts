@@ -56,6 +56,12 @@ export const APPT_TYPE_LABEL: Record<string, string> = {
   TREATMENT: 'Tedavi',
 };
 
+export const SALES_STATUS_LABEL: Record<string, string> = {
+  SOLD: 'Satış Oldu',
+  NEGATIVE: 'Olumsuz',
+  CALLBACK: 'Tekrar Aranacak',
+};
+
 export const VISIT_STATUS_LABEL: Record<string, string> = {
   WAITING: 'Bekliyor',
   IN_PROGRESS: 'İşlemde',

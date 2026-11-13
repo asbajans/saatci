@@ -58,6 +58,8 @@ export type AppointmentStatus =
   | 'CANCELLED'
   | 'NO_SHOW';
 
+export type SalesStatus = 'SOLD' | 'NEGATIVE' | 'CALLBACK';
+
 export type Appointment = {
   id: string;
   randevuNo: string;
@@ -71,6 +73,7 @@ export type Appointment = {
   createdBy?: { id: string; name: string; role: UserRole } | null;
   type: AppointmentType;
   status: AppointmentStatus;
+  salesStatus?: SalesStatus | null;
   channel?: string | null;
   campaignId?: string | null;
   campaign?: Campaign | null;

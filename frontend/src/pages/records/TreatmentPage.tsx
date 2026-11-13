@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useAppStore } from '../../store/appStore';
@@ -38,7 +39,9 @@ const newItem = (): ItemForm => ({
 export const TreatmentPage: React.FC = () => {
   const { user } = useAppStore();
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<any | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [patientId, setPatientId] = useState('');
   const [doctorId, setDoctorId] = useState('');
@@ -93,6 +96,57 @@ export const TreatmentPage: React.FC = () => {
     queryClient.invalidateQueries({ queryKey: ['patient'] });
   };
 
+  const resetForm = () => {
+    setPatientId('');
+    setDoctorId('');
+    setTariffId('');
+    setItems([newItem()]);
+    setDiscount('');
+    setPaymentNote('');
+    setEditingPlan(null);
+  };
+
+  const closeForm = () => {
+    setCreateOpen(false);
+    resetForm();
+  };
+
+  const openCreate = () => {
+    resetForm();
+    setCreateOpen(true);
+  };
+
+  useEffect(() => {
+    const patientIdParam = searchParams.get('patientId');
+    if (!patientIdParam) return;
+    resetForm();
+    setPatientId(patientIdParam);
+    setCreateOpen(true);
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const openEdit = (plan: any) => {
+    setEditingPlan(plan);
+    setPatientId(plan.patientId);
+    setDoctorId(plan.doctorId || '');
+    setTariffId(plan.tariffId || '');
+    setDiscount(plan.discount !== null && plan.discount !== undefined ? String(plan.discount) : '');
+    setPaymentNote(plan.paymentPlan?.note || '');
+    setItems(
+      (plan.items || []).map((item: any) => ({
+        toothNo: item.toothNo || '',
+        serviceId: item.serviceId || '',
+        tariffItemId: item.tariffItemId || '',
+        code: item.code || '',
+        treatment: item.treatment || '',
+        price: String(item.price ?? ''),
+        quantity: item.quantity || 1,
+        vatRate: item.vatRate !== null && item.vatRate !== undefined ? String(item.vatRate) : '',
+      }))
+    );
+    setCreateOpen(true);
+  };
+
   const createMutation = useMutation({
     mutationFn: async () => {
       await api.post('/treatment', {
@@ -117,13 +171,48 @@ export const TreatmentPage: React.FC = () => {
     },
     onSuccess: () => {
       invalidate();
-      setCreateOpen(false);
-      setPatientId('');
-      setDoctorId('');
-      setTariffId('');
-      setItems([newItem()]);
-      setDiscount('');
-      setPaymentNote('');
+      closeForm();
+    },
+    onError: (err) => alert(apiError(err)),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingPlan) return;
+      await api.patch(`/treatment/${editingPlan.id}`, {
+        doctorId: doctorId || undefined,
+        tariffId: tariffId || undefined,
+        totalPrice: String(total),
+        discount: String(Number(discount) || 0),
+        paymentPlan: paymentNote ? { note: paymentNote } : undefined,
+        items: items.map((item, index) => ({
+          toothNo: item.toothNo || undefined,
+          serviceId: item.serviceId || undefined,
+          tariffItemId: item.tariffItemId || undefined,
+          code: item.code || undefined,
+          treatment: item.treatment,
+          price: item.price,
+          quantity: item.quantity,
+          vatRate: item.vatRate !== '' ? Number(item.vatRate) : undefined,
+          stepOrder: index + 1,
+        })),
+      });
+    },
+    onSuccess: () => {
+      invalidate();
+      closeForm();
+    },
+    onError: (err) => alert(apiError(err)),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/treatment/${id}`);
+    },
+    onSuccess: (_data, id) => {
+      invalidate();
+      if (detailId === id) setDetailId(null);
+      if (editingPlan?.id === id) closeForm();
     },
     onError: (err) => alert(apiError(err)),
   });
@@ -151,7 +240,7 @@ export const TreatmentPage: React.FC = () => {
       <PageHeader
         title="Tedavi Planları"
         subtitle="Tedavi kalemleri, fiyatlar, onay ve uygulama durumu"
-        action={canManage ? <Button onClick={() => setCreateOpen(true)}>+ Yeni Tedavi Planı</Button> : undefined}
+        action={canManage ? <Button onClick={openCreate}>+ Yeni Tedavi Planı</Button> : undefined}
       />
 
       <Card>
@@ -185,9 +274,26 @@ export const TreatmentPage: React.FC = () => {
                 <td className="px-4 py-3">
                   <div className="flex items-center justify-end gap-2">
                     {canManage && plan.status === 'DRAFT' && (
-                      <Button size="sm" variant="success" onClick={() => approveMutation.mutate(plan.id)}>
-                        Onayla
-                      </Button>
+                      <>
+                        <Button size="sm" variant="success" onClick={() => approveMutation.mutate(plan.id)}>
+                          Onayla
+                        </Button>
+                        <Button size="sm" variant="secondary" onClick={() => openEdit(plan)}>
+                          Düzenle
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => {
+                            if (confirm('Bu taslak planı silmek istediğinize emin misiniz?')) {
+                              deleteMutation.mutate(plan.id);
+                            }
+                          }}
+                          disabled={deleteMutation.isPending}
+                        >
+                          Sil
+                        </Button>
+                      </>
                     )}
                     {canManage && (
                       <Select
@@ -215,27 +321,50 @@ export const TreatmentPage: React.FC = () => {
 
       <Modal
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        title="Yeni Tedavi Planı"
+        onClose={closeForm}
+        title={editingPlan ? 'Tedavi Planını Düzenle' : 'Yeni Tedavi Planı'}
         wide
         footer={
           <>
-            <Button variant="secondary" onClick={() => setCreateOpen(false)}>
+            <Button variant="secondary" onClick={closeForm}>
               Vazgeç
             </Button>
             <Button
-              onClick={() => createMutation.mutate()}
-              disabled={!patientId || !doctorId || validItems.length === 0 || createMutation.isPending}
+              onClick={() => (editingPlan ? updateMutation.mutate() : createMutation.mutate())}
+              disabled={
+                !patientId ||
+                !doctorId ||
+                validItems.length === 0 ||
+                createMutation.isPending ||
+                updateMutation.isPending
+              }
             >
-              {createMutation.isPending ? 'Kaydediliyor...' : 'Planı Kaydet'}
+              {editingPlan
+                ? updateMutation.isPending
+                  ? 'Güncelleniyor...'
+                  : 'Değişiklikleri Kaydet'
+                : createMutation.isPending
+                  ? 'Kaydediliyor...'
+                  : 'Planı Kaydet'}
             </Button>
           </>
         }
       >
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <Field label="Hasta *" hint="Ad, telefon veya TC ile arayın. Kayıtlı değilse aynı ekrandan yeni hasta oluşturabilirsiniz.">
-            <PatientPicker value={patientId} onChange={setPatientId} />
-          </Field>
+          {editingPlan ? (
+            <Field label="Hasta">
+              <Input
+                readOnly
+                value={`${editingPlan.patient?.name || ''} ${editingPlan.patient?.surname || ''}${
+                  editingPlan.patient?.hastaNo ? ` · ${editingPlan.patient.hastaNo}` : ''
+                }`}
+              />
+            </Field>
+          ) : (
+            <Field label="Hasta *" hint="Ad, telefon veya TC ile arayın. Kayıtlı değilse aynı ekrandan yeni hasta oluşturabilirsiniz.">
+              <PatientPicker value={patientId} onChange={setPatientId} />
+            </Field>
+          )}
           <Field label="Doktor *">
             <Select value={doctorId} onChange={(e) => setDoctorId(e.target.value)}>
               <option value="">Doktor seçin</option>
@@ -375,6 +504,32 @@ export const TreatmentPage: React.FC = () => {
               <span className="text-sm font-semibold">{money(detail.totalPrice)}</span>
               {Number(detail.discount) > 0 && (
                 <span className="text-xs text-slate-400">indirim {money(detail.discount)}</span>
+              )}
+              {canManage && detail.status === 'DRAFT' && (
+                <div className="ml-auto flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setDetailId(null);
+                      openEdit(detail);
+                    }}
+                  >
+                    Düzenle
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => {
+                      if (confirm('Bu taslak planı silmek istediğinize emin misiniz?')) {
+                        deleteMutation.mutate(detail.id);
+                      }
+                    }}
+                    disabled={deleteMutation.isPending}
+                  >
+                    Sil
+                  </Button>
+                </div>
               )}
             </div>
             <div className="flex flex-wrap gap-4 text-sm text-slate-500">

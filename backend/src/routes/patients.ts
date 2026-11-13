@@ -189,7 +189,8 @@ router.put(
         mobilePhone: data.mobilePhone,
         wiredPhone: data.wiredPhone,
         email: data.email === '' ? null : data.email,
-        birthDate: data.birthDate ? new Date(data.birthDate) : undefined,
+        birthDate:
+          data.birthDate !== undefined ? (data.birthDate ? new Date(data.birthDate) : null) : undefined,
         gender: data.gender,
         nationality: data.nationality,
         country: data.country,

@@ -51,6 +51,7 @@ export const LeadsPage: React.FC = () => {
   const [callbackLead, setCallbackLead] = useState<any>(null);
   const [callbackForm, setCallbackForm] = useState({ dateTime: '', note: '' });
   const [cardLeadId, setCardLeadId] = useState<string | null>(null);
+  const [cardForm, setCardForm] = useState({ name: '', phone: '', email: '', source: '', campaignId: '' });
   const [cardDescription, setCardDescription] = useState('');
   const [noteContent, setNoteContent] = useState('');
 
@@ -103,6 +104,17 @@ export const LeadsPage: React.FC = () => {
   useEffect(() => {
     setCardDescription(cardLead?.description || '');
   }, [cardLead?.id, cardLead?.description]);
+
+  useEffect(() => {
+    if (!cardLead) return;
+    setCardForm({
+      name: cardLead.name || '',
+      phone: cardLead.phone || '',
+      email: cardLead.email || '',
+      source: cardLead.source || '',
+      campaignId: cardLead.campaignId || '',
+    });
+  }, [cardLead?.id, cardLead?.name, cardLead?.phone, cardLead?.email, cardLead?.source, cardLead?.campaignId]);
 
   const { data: staff = [] } = useQuery({
     queryKey: ['staff'],
@@ -232,6 +244,26 @@ export const LeadsPage: React.FC = () => {
     onError: (err) => alert(apiError(err)),
   });
 
+  const cardInfoMutation = useMutation({
+    mutationFn: async () => {
+      if (!cardLeadId) return;
+      await api.patch(`/leads/${cardLeadId}`, {
+        name: cardForm.name.trim(),
+        phone: cardForm.phone.trim(),
+        email: cardForm.email || '',
+        source: cardForm.source,
+        campaignId: cardForm.campaignId || null,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lead', cardLeadId] });
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+      queryClient.invalidateQueries({ queryKey: ['lead-sources'] });
+      alert('Lead bilgileri güncellendi');
+    },
+    onError: (err) => alert(apiError(err)),
+  });
+
   const descriptionMutation = useMutation({
     mutationFn: async () => {
       if (!cardLeadId) return;
@@ -282,6 +314,8 @@ export const LeadsPage: React.FC = () => {
     setDateFrom('');
     setDateTo('');
   };
+
+  const cardSources = Array.from(new Set([...SOURCES, ...sources, cardForm.source].filter(Boolean)));
 
   return (
     <div className="space-y-6">
@@ -690,9 +724,22 @@ export const LeadsPage: React.FC = () => {
         title={`Lead Kartı - ${cardLead?.name || ''}`}
         wide
         footer={
-          <Button variant="secondary" onClick={closeCard}>
-            Kapat
-          </Button>
+          <>
+            <Button variant="secondary" onClick={closeCard}>
+              Kapat
+            </Button>
+            <Button
+              onClick={() => cardInfoMutation.mutate()}
+              disabled={
+                !cardLead ||
+                cardForm.name.trim().length < 2 ||
+                cardForm.phone.trim().length < 5 ||
+                cardInfoMutation.isPending
+              }
+            >
+              {cardInfoMutation.isPending ? 'Kaydediliyor...' : 'Bilgileri Kaydet'}
+            </Button>
+          </>
         }
       >
         {cardLoading || !cardLead ? (
@@ -700,30 +747,49 @@ export const LeadsPage: React.FC = () => {
         ) : (
           <div className="space-y-5">
             <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-              <div>
-                <p className="text-xs text-slate-500">Telefon</p>
-                <p className="font-medium text-slate-800">{cardLead.phone}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500">E-posta</p>
-                <p className="font-medium text-slate-800">{cardLead.email || '-'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500">Kaynak</p>
-                <p className="font-medium text-slate-800">{cardLead.source}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500">Kampanya</p>
-                <p className="font-medium text-slate-800">{cardLead.campaign?.name || '-'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500">Durum</p>
-                <Badge tone={statusTone(cardLead.status)}>{LEAD_STATUS_LABEL[cardLead.status]}</Badge>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500">Kayıt Tarihi</p>
-                <p className="font-medium text-slate-800">{dateTime(cardLead.createdAt)}</p>
-              </div>
+              <Field label="Ad Soyad *">
+                <Input value={cardForm.name} onChange={(e) => setCardForm({ ...cardForm, name: e.target.value })} />
+              </Field>
+              <Field label="Telefon *">
+                <Input value={cardForm.phone} onChange={(e) => setCardForm({ ...cardForm, phone: e.target.value })} />
+              </Field>
+              <Field label="E-posta">
+                <Input
+                  type="email"
+                  value={cardForm.email}
+                  onChange={(e) => setCardForm({ ...cardForm, email: e.target.value })}
+                />
+              </Field>
+              <Field label="Kaynak">
+                <Select value={cardForm.source} onChange={(e) => setCardForm({ ...cardForm, source: e.target.value })}>
+                  {cardSources.map((source) => (
+                    <option key={source} value={source}>
+                      {source}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Kampanya">
+                <Select
+                  value={cardForm.campaignId}
+                  onChange={(e) => setCardForm({ ...cardForm, campaignId: e.target.value })}
+                >
+                  <option value="">Kampanyasız</option>
+                  {campaigns.map((campaign: any) => (
+                    <option key={campaign.id} value={campaign.id}>
+                      {campaign.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Durum">
+                <div className="py-1">
+                  <Badge tone={statusTone(cardLead.status)}>{LEAD_STATUS_LABEL[cardLead.status]}</Badge>
+                </div>
+              </Field>
+              <Field label="Kayıt Tarihi">
+                <p className="py-1 font-medium text-slate-800">{dateTime(cardLead.createdAt)}</p>
+              </Field>
             </div>
 
             {cardLead.patient && (
